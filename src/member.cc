@@ -205,6 +205,8 @@ class RedisChainModule {
   // The sent list.
   std::set<int64_t> sent_;
   // For implementing checkpointing.
+  // NOTE(zongheng): This can be slow.  We should investigate alternatives: (1)
+  // 2 vectors, (2) FlatMap.
   std::map<int64_t, std::string> sn_to_key_;
 
   // Drop writes.  Used when adding a child which acts as the new tail.
@@ -244,6 +246,7 @@ int Put(RedisModuleCtx* ctx,
     }
   } else {
     RedisModule_StringSet(key, data);
+    // NOTE(zongheng): this can be slow, see the note in class declaration.
     module.sn_to_key()[sn] = k;
     module.record_sn(static_cast<int64_t>(sn));
   }
@@ -257,13 +260,11 @@ int Put(RedisModuleCtx* ctx,
     if (RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_ERROR) {
       return RedisModule_ReplyWithCallReply(ctx, reply);
     }
-
-    // TODO(zongheng): in 1-node chain case, commenting this out gives +3%
-    // throughput.  We should change this into a local func call for 1-node
-    // case.
-    reply = RedisModule_Call(ctx, "MEMBER.ACK", "c", seqnum.c_str());
-    if (RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_ERROR) {
-      return RedisModule_ReplyWithCallReply(ctx, reply);
+    if (module.parent()) {
+      reply = RedisModule_Call(ctx, "MEMBER.ACK", "c", seqnum.c_str());
+      if (RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_ERROR) {
+        return RedisModule_ReplyWithCallReply(ctx, reply);
+      }
     }
   } else {
     const std::string v = ReadString(data);

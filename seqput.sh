@@ -13,6 +13,6 @@ NUM_NODES=${2:-1}
 #   grep throughput client<1-12>.log | cut -d' ' -f 11 | sort -n | tail -n1 | awk '{time=$1/1000} END {print 500000*12/time}'
 
 for i in $(seq 1 $NUM_CLIENTS); do
-    ./src/credis_seqput_bench $NUM_NODES 2>&1 | tee client$i.log &
+    ./build/src/credis_seqput_bench $NUM_NODES 2>&1 | tee client$i.log &
 done
 wait

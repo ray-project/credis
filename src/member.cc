@@ -152,7 +152,7 @@ class RedisChainModule {
 
   void SetRole(ChainRole chain_role) { chain_role_ = chain_role; }
   ChainRole Role() const { return chain_role_; }
-  constexpr const char* ChainRoleName() const {
+  const char* ChainRoleName() const {
     return chain_role_ == ChainRole::kSingleton
                ? "SINGLETON"
                : (chain_role_ == ChainRole::kHead

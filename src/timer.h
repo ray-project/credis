@@ -1,6 +1,7 @@
 #ifndef CREDIS_TIMER_
 #define CREDIS_TIMER_
 
+#include <cmath>
 #include <vector>
 
 #include <sys/time.h>

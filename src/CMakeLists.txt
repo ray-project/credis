@@ -12,6 +12,7 @@ if(APPLE)
   set(REDIS_MODULE_LDFLAGS "-undefined dynamic_lookup")
   set(CMAKE_SHARED_LIBRARY_SUFFIX ".so")
 else()
+  #set(REDIS_MODULE_CFLAGS -W -Wall -fno-common -g -ggdb -std=c++11 -O3)
   set(REDIS_MODULE_CFLAGS -W -Wall -fno-common -g -ggdb -std=c++11 -O3)
   set(REDIS_MODULE_LDFLAGS -shared)
 endif()
@@ -57,22 +58,22 @@ add_executable(credis_parput_bench credis_parput_bench.cc)
 target_link_libraries(credis_parput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
-  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o)
+  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o tcmalloc)
 
 add_executable(credis_seqput_bench credis_seqput_bench.cc)
 target_link_libraries(credis_seqput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
-  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o)
+  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o tcmalloc)
 
 add_executable(redis_parput_bench redis_parput_bench.cc)
 target_link_libraries(redis_parput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
-  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o)
+  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o tcmalloc)
 
 add_executable(redis_seqput_bench redis_seqput_bench.cc)
 target_link_libraries(redis_seqput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
-  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o)
+  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o tcmalloc)

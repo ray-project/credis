@@ -45,7 +45,7 @@ class MasterClient {
   Status SetWatermark(Watermark w, int64_t new_val);
 
  private:
-  constexpr const char* WatermarkKey(Watermark w) const;
+  const char* WatermarkKey(Watermark w) const;
 
   std::unique_ptr<redisContext> redis_context_;
 

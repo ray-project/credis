@@ -1,6 +1,7 @@
 // TODO(zongheng): this benchmark is likely outdated and needs fixes.
 
 #include <chrono>
+#include <cmath>
 #include <vector>
 
 #include "glog/logging.h"

@@ -22,7 +22,9 @@ class Timer {
   }
   void TimeOpBegin() {
     const double now = NowMicrosecs();
-    CHECK(latency_micros_.size() == begin_timestamps_.size());
+    CHECK(latency_micros_.size() == begin_timestamps_.size())
+        << " sizes " << latency_micros_.size() << " "
+        << begin_timestamps_.size();
     begin_timestamps_.push_back(now);
   }
   void TimeOpEnd(int num_completed) {

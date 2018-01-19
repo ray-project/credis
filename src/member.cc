@@ -247,7 +247,7 @@ int Put(RedisModuleCtx* ctx,
   } else {
     RedisModule_StringSet(key, data);
     // NOTE(zongheng): this can be slow, see the note in class declaration.
-    module.sn_to_key()[sn] = k;
+    // module.sn_to_key()[sn] = k;
     module.record_sn(static_cast<int64_t>(sn));
   }
   RedisModule_CloseKey(key);
@@ -281,7 +281,7 @@ int Put(RedisModuleCtx* ctx,
           is_flush ? kStringOne : kStringZero, cid.data(), cid.size());
       // TODO(zongheng): check status.
       // LOG_EVERY_N(INFO, 999999999) << "Done";
-      module.sent().insert(sn);
+      // module.sent().insert(sn);
     } else {
       // TODO(zongheng): this case is incompletely handled, i.e. "failure of a
       // middle server".  To handle this the Sent list data structure needs to
@@ -543,7 +543,7 @@ int MemberAck_RedisCommand(RedisModuleCtx* ctx,
   std::string sn = ReadString(argv[1]);
   // LOG_EVERY_N(INFO, 999999999)
   //     << "Erasing sequence number " << sn << " from sent list";
-  module.sent().erase(std::stoi(sn));
+  // module.sent().erase(std::stoi(sn));
   if (module.parent()) {
     // LOG_EVERY_N(INFO, 999999999) << "Propagating the ACK up the chain";
     const int status = redisAsyncCommand(module.parent(), NULL, NULL,

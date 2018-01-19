@@ -42,16 +42,28 @@ RedisCallbackManager::RedisCallback& RedisCallbackManager::get(
   }
 
 RedisClient::~RedisClient() {
-  if (context_) {
-    redisFree(context_);
-  }
-  if (async_context_) {
-    redisAsyncFree(async_context_);
-  }
+  if (context_) redisFree(context_);
+  if (write_context_) redisAsyncFree(write_context_);
+  if (read_context_) redisAsyncFree(read_context_);
 }
 
 constexpr int64_t kRedisDBConnectRetries = 50;
 constexpr int64_t kRedisDBWaitMilliseconds = 100;
+
+namespace {
+Status ConnectContext(const std::string& address,
+                      int port,
+                      redisAsyncContext** context) {
+  redisAsyncContext* ctx = redisAsyncConnect(address.c_str(), port);
+  if (ctx == nullptr || ctx->err) {
+    LOG(ERROR) << "Could not establish connection to redis " << address << ":"
+               << port;
+    return Status::IOError("ERR");
+  }
+  *context = ctx;
+  return Status::OK();
+}
+}  // namespace
 
 Status RedisClient::Connect(const std::string& address,
                             int write_port,
@@ -79,20 +91,10 @@ Status RedisClient::Connect(const std::string& address,
       redisCommand(context_, "CONFIG SET notify-keyspace-events Kl"));
   REDIS_CHECK_ERROR(context_, reply);
 
-  // Connect to async context
-  async_context_ = redisAsyncConnect(address.c_str(), write_port);
-  if (async_context_ == nullptr || async_context_->err) {
-    LOG(ERROR) << "Could not establish connection to redis " << address << ":"
-               << write_port;
-    return Status::IOError("ERR");
-  }
-  ack_subscribe_context_ = redisAsyncConnect(address.c_str(), ack_port);
-  if (ack_subscribe_context_ == nullptr || ack_subscribe_context_->err) {
-    LOG(ERROR) << "Could not establish connection to redis " << address << ":"
-               << ack_port;
-    return Status::IOError("ERR");
-  }
-
+  // Connect to async contexts.
+  CHECK(ConnectContext(address, write_port, &write_context_).ok());
+  CHECK(ConnectContext(address, ack_port, &read_context_).ok());
+  CHECK(ConnectContext(address, ack_port, &ack_subscribe_context_).ok());
   return Status::OK();
 }
 
@@ -101,7 +103,10 @@ Status RedisClient::Connect(const std::string& address, int port) {
 }
 
 Status RedisClient::AttachToEventLoop(aeEventLoop* loop) {
-  if (redisAeAttach(loop, async_context_) != REDIS_OK) {
+  if (redisAeAttach(loop, write_context_) != REDIS_OK) {
+    return Status::IOError("could not attach redis event loop");
+  }
+  if (redisAeAttach(loop, read_context_) != REDIS_OK) {
     return Status::IOError("could not attach redis event loop");
   }
   if (redisAeAttach(loop, ack_subscribe_context_) != REDIS_OK) {
@@ -118,7 +123,7 @@ Status RedisClient::RegisterAckCallback(redisCallbackFn* callback) {
                                        /*privdata=*/NULL, "SUBSCRIBE %b",
                                        kChan.c_str(), kChan.size());
   if (status == REDIS_ERR) {
-    return Status::IOError(std::string(async_context_->errstr));
+    return Status::IOError(std::string(ack_subscribe_context_->errstr));
   }
   return Status::OK();
 }
@@ -131,22 +136,22 @@ Status RedisClient::RunAsync(const std::string& command,
   if (length > 0) {
     std::string redis_command = command + " %b %b";
     int status = redisAsyncCommand(
-        async_context_,
+        write_context_,
         reinterpret_cast<redisCallbackFn*>(&GlobalRedisCallback),
         reinterpret_cast<void*>(callback_index), redis_command.c_str(),
         id.data(), id.size(), data, length);
     if (status == REDIS_ERR) {
-      return Status::IOError(std::string(async_context_->errstr));
+      return Status::IOError(std::string(write_context_->errstr));
     }
   } else {
     std::string redis_command = command + " %b";
     int status = redisAsyncCommand(
-        async_context_,
+        write_context_,
         reinterpret_cast<redisCallbackFn*>(&GlobalRedisCallback),
         reinterpret_cast<void*>(callback_index), redis_command.c_str(),
         id.data(), id.size());
     if (status == REDIS_ERR) {
-      return Status::IOError(std::string(async_context_->errstr));
+      return Status::IOError(std::string(write_context_->errstr));
     }
   }
   return Status::OK();

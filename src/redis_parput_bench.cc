@@ -19,7 +19,7 @@ int main() {
   RedisClient client;
   client.Connect("127.0.0.1", 6370);
   client.AttachToEventLoop(loop);
-  redisAsyncContext* context = client.async_context();
+  redisAsyncContext* context = client.write_context();
 
   LOG(INFO) << "starting bench";
   auto start = std::chrono::system_clock::now();

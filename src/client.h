@@ -60,11 +60,13 @@ class RedisClient {
 
   // Does not transfer ownership.
   redisContext* context() const { return context_; };
-  redisAsyncContext* async_context() const { return async_context_; };
+  redisAsyncContext* write_context() const { return write_context_; };
+  redisAsyncContext* read_context() const { return read_context_; };
 
  private:
   redisContext* context_;
-  redisAsyncContext* async_context_;
+  redisAsyncContext* write_context_;
+  redisAsyncContext* read_context_;
   redisAsyncContext* ack_subscribe_context_;
 };
 

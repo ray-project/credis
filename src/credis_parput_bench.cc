@@ -71,7 +71,7 @@ int main() {
   client.Connect("127.0.0.1", 6370);
   client.AttachToEventLoop(loop);
   client.RegisterAckCallback(&ParallelPutAckCallback);
-  write_context = client.async_context();
+  write_context = client.write_context();
 
   int num_calls = 0;
   // const int N = 5000;

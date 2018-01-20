@@ -32,7 +32,8 @@ class Timer {
   void TimeOpEnd(int num_completed) {
     const double now = NowMicrosecs();
     CHECK(latency_micros_.size() == num_completed - 1);
-    CHECK(begin_timestamps_.size() == num_completed);
+    CHECK(begin_timestamps_.size() == num_completed)
+        << begin_timestamps_.size() << " " << num_completed;
     latency_micros_.push_back(now - begin_timestamps_.back());
   }
   void Stats(double* mean, double* std) {
@@ -46,7 +47,8 @@ class Timer {
     *std = std::sqrt(sum / latency_micros_.size());
   }
 
-  const std::vector<double>& latency_micros() { return latency_micros_; }
+  std::vector<double>& begin_timestamps() { return begin_timestamps_; }
+  std::vector<double>& latency_micros() { return latency_micros_; }
 
  private:
   std::vector<double> begin_timestamps_;

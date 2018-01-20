@@ -57,6 +57,8 @@ void AsyncRandomCommand() {
 }
 
 void OnCompleteLaunchNext(int* cnt, int other_cnt) {
+  // Sometimes an ACK comes back late, just ignore if we're done.
+  if (*cnt + other_cnt >= N) return;
   ++(*cnt);
   timer.TimeOpEnd(*cnt + other_cnt);
   if (*cnt + other_cnt == N) {
@@ -174,6 +176,7 @@ int RetryPutTimer(aeEventLoop* loop, long long timer_id, void*) {
     LOG(INFO) << "Retrying PUT " << writes_completed;
     LOG(INFO) << "now " << now_us << " last " << last_unacked_timestamp
               << " diff " << diff;
+    timer.begin_timestamps().pop_back();
     AsyncPut();
   }
   return 0;  // Reset timer to 0.

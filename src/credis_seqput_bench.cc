@@ -83,6 +83,7 @@ void SeqPutCallback(redisAsyncContext* write_context,  // != ack_context.
     last_unacked_timestamp = -1;
     OnCompleteLaunchNext(&writes_completed, reads_completed);
   } else {
+    //LOG(INFO) << "seqnum assigned " << assigned_seqnum;
     assigned_seqnums.insert(assigned_seqnum);
   }
 }
@@ -159,10 +160,12 @@ void SeqPutAckCallback(redisAsyncContext* ack_context,  // != write_context.
 
   auto it = assigned_seqnums.find(received_sn);
   if (it == assigned_seqnums.end()) {
+    //LOG(INFO) << "seqnum acked " << received_sn;
     acked_seqnums.insert(received_sn);
     return;
   }
   // Otherwise, found & act on this ACK.
+    //LOG(INFO) << "seqnum acked " << received_sn;
   assigned_seqnums.erase(it);
   last_unacked_timestamp = -1;
   OnCompleteLaunchNext(&writes_completed, reads_completed);
@@ -206,7 +209,7 @@ int main(int argc, char** argv) {
   // Timings related.
   timer.ExpectOps(N);
 
-  aeCreateTimeEvent(loop, /*milliseconds=*/1, &RetryPutTimer, NULL, NULL);
+  aeCreateTimeEvent(loop, /*milliseconds=*/100, &RetryPutTimer, NULL, NULL);
 
   std::this_thread::sleep_for(std::chrono::seconds(1));
   LOG(INFO) << "starting bench";
@@ -233,13 +236,13 @@ int main(int argc, char** argv) {
             << N << ", write_ratio " << kWriteRatio;
 
   // Timings related.
-  double mean = 0, std = 0;
-  timer.Stats(&mean, &std);
-  LOG(INFO) << "latency (us) mean " << mean << " std " << std;
-  {
-    std::ofstream ofs("latency.txt");
-    for (double x : timer.latency_micros()) ofs << x << std::endl;
-  }
+   double mean = 0, std = 0;
+   timer.Stats(&mean, &std);
+   LOG(INFO) << "latency (us) mean " << mean << " std " << std;
+//   {
+//     std::ofstream ofs("latency.txt");
+//     for (double x : timer.latency_micros()) ofs << x << std::endl;
+//   }
 
   return 0;
 }

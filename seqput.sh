@@ -14,12 +14,18 @@ WRITE_RATIO=${3:-1}
 #   grep throughput client<1-12>.log | cut -d' ' -f 11 | sort -n | tail -n1 | awk '{time=$1/1000} END {print 500000*12/time}'
 
 rm -rf client*.log
-pkill -f redis-server; ./setup.sh $NUM_NODES;
+pkill -f credis_seqput_bench
+pkill -f redis-server 
+sleep 2
+./setup.sh $NUM_NODES
+sleep 2
+
 for i in $(seq 1 $NUM_CLIENTS); do
-    ./build/src/credis_seqput_bench $NUM_NODES $WRITE_RATIO 2>&1 | tee client$i.log &
+    ./build/src/credis_seqput_bench $NUM_NODES $WRITE_RATIO >client$i.log 2>&1 &
 done
 wait
 
 thput=$(grep throughput client*.log | tr -s ' ' | cut -d' ' -f 11 | sort -n | tail -n1 | awk -v N=$NUM_CLIENTS '{time=$1/1000} END {print 500000*N/time}')
-latency=$(grep latency client*.log | tr -s ' ' | cut -d' ' -f 8 | awk '{s += $1} END {print s/NR}')
+
+latency=$(grep latency client*.log | tr -s ' ' | cut -d' ' -f 8 | awk '{s+=$1} END {print s/NR}')
 echo "$NUM_CLIENTS $thput $latency" >> chain-${NUM_NODES}node-wr${WRITE_RATIO}.txt

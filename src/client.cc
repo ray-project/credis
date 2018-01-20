@@ -79,6 +79,7 @@ Status RedisClient::Connect(const std::string& address,
         LOG(ERROR) << "Could not establish connection to redis " << address
                    << ":" << write_port;
       }
+      CHECK(0);
       break;
     }
     LOG(ERROR) << "Failed to connect to Redis, retrying.";

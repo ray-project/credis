@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/bash
 set -x
 NUM_CLIENTS=${1:-1}
 WRITE_RATIO=${2:-1}
@@ -6,6 +6,8 @@ WRITE_RATIO=${2:-1}
 rm -rf client*.log
 
 pkill -f redis-server; ./setup.sh 1;
+
+sleep 2
 for i in $(seq 1 $NUM_CLIENTS); do
     ./build/src/redis_seqput_bench $WRITE_RATIO 2>&1 | tee client$i.log &
 done

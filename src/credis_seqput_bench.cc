@@ -42,7 +42,7 @@ const std::string client_id = std::to_string(getpid());
 // Forward declaration.
 void SeqPutCallback(redisAsyncContext*, void*, void*);
 void SeqGetCallback(redisAsyncContext*, void*, void*);
-void AsyncPut();
+void AsyncPut(bool);
 void AsyncGet();
 
 // Launch a GET or PUT, depending on "write_ratio".
@@ -50,7 +50,7 @@ void AsyncRandomCommand() {
   static std::uniform_real_distribution<double> unif(0.0, 1.0);
   const double r = unif(re);
   if (r < kWriteRatio || writes_completed == 0) {
-    AsyncPut();
+    AsyncPut(/*is_retry=*/false);
   } else {
     AsyncGet();
   }
@@ -88,10 +88,10 @@ void SeqPutCallback(redisAsyncContext* write_context,  // != ack_context.
 }
 
 // Put(n -> n), for n == writes_completed.
-void AsyncPut() {
+void AsyncPut(bool is_retry) {
   const std::string data = std::to_string(writes_completed);
   // LOG(INFO) << "PUT " << data;
-  last_unacked_timestamp = timer.TimeOpBegin();
+  if (!is_retry) last_unacked_timestamp = timer.TimeOpBegin();
   const int status = redisAsyncCommand(
       write_context, &SeqPutCallback,
       /*privdata=*/NULL, "MEMBER.PUT %b %b %b", data.data(), data.size(),
@@ -176,8 +176,7 @@ int RetryPutTimer(aeEventLoop* loop, long long timer_id, void*) {
     LOG(INFO) << "Retrying PUT " << writes_completed;
     LOG(INFO) << "now " << now_us << " last " << last_unacked_timestamp
               << " diff " << diff;
-    timer.begin_timestamps().pop_back();
-    AsyncPut();
+    AsyncPut(/*is_retry=*/true);
   }
   return 0;  // Reset timer to 0.
 }

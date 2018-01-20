@@ -21,12 +21,13 @@ class Timer {
     gettimeofday(&time, NULL);
     return (double) time.tv_sec * 1e6 + (double) time.tv_usec;
   }
-  void TimeOpBegin() {
+  double TimeOpBegin() {
     const double now = NowMicrosecs();
     CHECK(latency_micros_.size() == begin_timestamps_.size())
         << " sizes " << latency_micros_.size() << " "
         << begin_timestamps_.size();
     begin_timestamps_.push_back(now);
+    return now;
   }
   void TimeOpEnd(int num_completed) {
     const double now = NowMicrosecs();

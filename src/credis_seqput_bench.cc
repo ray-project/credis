@@ -26,6 +26,8 @@ std::string last_issued_read_key;
 std::default_random_engine re;
 double kWriteRatio = 1.0;
 
+double last_unacked_timestamp = -1;
+
 redisAsyncContext* write_context = nullptr;
 redisAsyncContext* read_context = nullptr;
 
@@ -76,6 +78,7 @@ void SeqPutCallback(redisAsyncContext* write_context,  // != ack_context.
   auto it = acked_seqnums.find(assigned_seqnum);
   if (it != acked_seqnums.end()) {
     acked_seqnums.erase(it);
+    last_unacked_timestamp = -1;
     OnCompleteLaunchNext(&writes_completed, reads_completed);
   } else {
     assigned_seqnums.insert(assigned_seqnum);
@@ -86,7 +89,7 @@ void SeqPutCallback(redisAsyncContext* write_context,  // != ack_context.
 void AsyncPut() {
   const std::string data = std::to_string(writes_completed);
   // LOG(INFO) << "PUT " << data;
-  timer.TimeOpBegin();
+  last_unacked_timestamp = timer.TimeOpBegin();
   const int status = redisAsyncCommand(
       write_context, &SeqPutCallback,
       /*privdata=*/NULL, "MEMBER.PUT %b %b %b", data.data(), data.size(),
@@ -159,7 +162,21 @@ void SeqPutAckCallback(redisAsyncContext* ack_context,  // != write_context.
   }
   // Otherwise, found & act on this ACK.
   assigned_seqnums.erase(it);
+  last_unacked_timestamp = -1;
   OnCompleteLaunchNext(&writes_completed, reads_completed);
+}
+
+const double kRetryTimeoutMicrosecs = 500000;
+int RetryPutTimer(aeEventLoop* loop, long long timer_id, void*) {
+  const double now_us = timer.NowMicrosecs();
+  const double diff = now_us - last_unacked_timestamp;
+  if (last_unacked_timestamp > 0 && diff > kRetryTimeoutMicrosecs) {
+    LOG(INFO) << "Retrying PUT " << writes_completed;
+    LOG(INFO) << "now " << now_us << " last " << last_unacked_timestamp
+              << " diff " << diff;
+    AsyncPut();
+  }
+  return 0;  // Reset timer to 0.
 }
 
 int main(int argc, char** argv) {
@@ -186,6 +203,8 @@ int main(int argc, char** argv) {
 
   // Timings related.
   timer.ExpectOps(N);
+
+  aeCreateTimeEvent(loop, /*milliseconds=*/1, &RetryPutTimer, NULL, NULL);
 
   std::this_thread::sleep_for(std::chrono::seconds(1));
   LOG(INFO) << "starting bench";

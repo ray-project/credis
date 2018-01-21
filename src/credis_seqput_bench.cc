@@ -27,6 +27,7 @@ std::default_random_engine re;
 double kWriteRatio = 1.0;
 
 double last_unacked_timestamp = -1;
+int64_t last_unacked_seqnum = -1;
 
 redisAsyncContext* write_context = nullptr;
 redisAsyncContext* read_context = nullptr;
@@ -81,9 +82,10 @@ void SeqPutCallback(redisAsyncContext* write_context,  // != ack_context.
   if (it != acked_seqnums.end()) {
     acked_seqnums.erase(it);
     last_unacked_timestamp = -1;
+    last_unacked_seqnum = -1;
     OnCompleteLaunchNext(&writes_completed, reads_completed);
   } else {
-    //LOG(INFO) << "seqnum assigned " << assigned_seqnum;
+    last_unacked_seqnum = assigned_seqnum;
     assigned_seqnums.insert(assigned_seqnum);
   }
 }
@@ -160,14 +162,15 @@ void SeqPutAckCallback(redisAsyncContext* ack_context,  // != write_context.
 
   auto it = assigned_seqnums.find(received_sn);
   if (it == assigned_seqnums.end()) {
-    //LOG(INFO) << "seqnum acked " << received_sn;
+    // LOG(INFO) << "seqnum acked " << received_sn;
     acked_seqnums.insert(received_sn);
     return;
   }
   // Otherwise, found & act on this ACK.
-    //LOG(INFO) << "seqnum acked " << received_sn;
+  // LOG(INFO) << "seqnum acked " << received_sn;
   assigned_seqnums.erase(it);
   last_unacked_timestamp = -1;
+  last_unacked_seqnum = -1;
   OnCompleteLaunchNext(&writes_completed, reads_completed);
 }
 
@@ -177,8 +180,12 @@ int RetryPutTimer(aeEventLoop* loop, long long timer_id, void*) {
   const double diff = now_us - last_unacked_timestamp;
   if (last_unacked_timestamp > 0 && diff > kRetryTimeoutMicrosecs) {
     LOG(INFO) << "Retrying PUT " << writes_completed;
-    LOG(INFO) << "now " << now_us << " last " << last_unacked_timestamp
-              << " diff " << diff;
+    LOG(INFO) << " time diff " << diff << "; last_unacked_seqnum "
+              << last_unacked_seqnum;
+    // If the ACK comes back later, we should ignore it.
+    auto it = assigned_seqnums.find(last_unacked_seqnum);
+    CHECK(it != assigned_seqnums.end());
+    assigned_seqnums.erase(it);
     AsyncPut(/*is_retry=*/true);
   }
   return 0;  // Reset timer to 0.
@@ -236,13 +243,13 @@ int main(int argc, char** argv) {
             << N << ", write_ratio " << kWriteRatio;
 
   // Timings related.
-   double mean = 0, std = 0;
-   timer.Stats(&mean, &std);
-   LOG(INFO) << "latency (us) mean " << mean << " std " << std;
-//   {
-//     std::ofstream ofs("latency.txt");
-//     for (double x : timer.latency_micros()) ofs << x << std::endl;
-//   }
+  double mean = 0, std = 0;
+  timer.Stats(&mean, &std);
+  LOG(INFO) << "latency (us) mean " << mean << " std " << std;
+  //   {
+  //     std::ofstream ofs("latency.txt");
+  //     for (double x : timer.latency_micros()) ofs << x << std::endl;
+  //   }
 
   return 0;
 }

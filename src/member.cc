@@ -230,13 +230,14 @@ int Put(RedisModuleCtx* ctx,
         RedisModuleString* client_id,
         long long sn,
         bool is_flush) {
-  RedisModuleKey* key = reinterpret_cast<RedisModuleKey*>(
-      RedisModule_OpenKey(ctx, name, REDISMODULE_WRITE));
   const std::string k = ReadString(name);
   // TODO(pcm): error checking
 
   // State maintenance.
   if (is_flush) {
+
+  RedisModuleKey* key = reinterpret_cast<RedisModuleKey*>(
+      RedisModule_OpenKey(ctx, name, REDISMODULE_WRITE));
     RedisModule_DeleteKey(key);
     module.sn_to_key().erase(sn);
     // The tail has the responsibility of updating the sn_flushed watermark.
@@ -244,13 +245,21 @@ int Put(RedisModuleCtx* ctx,
       // "sn + 1" is the next sn to be flushed.
       module.Master().SetWatermark(MasterClient::Watermark::kSnFlushed, sn + 1);
     }
+  RedisModule_CloseKey(key);
   } else {
-    RedisModule_StringSet(key, data);
+
+    //RedisModule_StringSet(key, data);
+
+    RedisModuleCallReply* reply =
+    RedisModule_Call(ctx, "SET", "ss", name, data);
+    if (RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_ERROR) {
+      return RedisModule_ReplyWithCallReply(ctx, reply);
+    }
+
     // NOTE(zongheng): this can be slow, see the note in class declaration.
     // module.sn_to_key()[sn] = k;
     module.record_sn(static_cast<int64_t>(sn));
   }
-  RedisModule_CloseKey(key);
 
   // Protocol.
   const std::string seqnum = std::to_string(sn);
@@ -296,8 +305,10 @@ int Put(RedisModuleCtx* ctx,
       // TODO(zongheng): is it okay to reply SN to client in this case as well?
     }
   }
+  // TODO: is this needed?!
   // Return the sequence number
-  RedisModule_ReplyWithLongLong(ctx, sn);
+  //if (!module.ActAsHead()) {RedisModule_ReplyWithNull(ctx);}
+  //RedisModule_ReplyWithLongLong(ctx,sn);
   return REDISMODULE_OK;
 }
 
@@ -424,6 +435,10 @@ int MemberPut_RedisCommand(RedisModuleCtx* ctx,
     // LOG(INFO) << "MemberPut";
     if (!module.DropWrites()) {
       const long long sn = module.inc_sn();
+
+      // Return the sequence number
+      RedisModule_ReplyWithLongLong(ctx, sn);
+
       // LOG(INFO) << "MemberPut, assigning new sn " << sn;
       return Put(ctx, argv[1], argv[2], argv[3], sn, /*is_flush=*/false);
     } else {
@@ -551,7 +566,8 @@ int MemberAck_RedisCommand(RedisModuleCtx* ctx,
                                          "MEMBER.ACK %b", sn.data(), sn.size());
     // TODO(zongheng): check status.
   }
-  RedisModule_ReplyWithNull(ctx);
+  // TODO: is this needed?
+  //RedisModule_ReplyWithNull(ctx);
   return REDISMODULE_OK;
 }
 

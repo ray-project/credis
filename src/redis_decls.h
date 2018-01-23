@@ -23,6 +23,7 @@ extern char *REDISMODULE_API_FUNC(RedisModule_StringDMA)(RedisModuleKey *key, si
 extern const char *REDISMODULE_API_FUNC(RedisModule_StringPtrLen)(const RedisModuleString *str, size_t *len);
 extern void REDISMODULE_API_FUNC(RedisModule_FreeString)(RedisModuleCtx *ctx, RedisModuleString *str);
 extern int REDISMODULE_API_FUNC(RedisModule_KeyType)(RedisModuleKey *kp);
+extern int REDISMODULE_API_FUNC(RedisModule_Publish)(RedisModuleString *channel, RedisModuleString *message);
 
 }
 

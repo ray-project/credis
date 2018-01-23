@@ -233,11 +233,11 @@ int Put(RedisModuleCtx* ctx,
   const std::string k = ReadString(name);
   // TODO(pcm): error checking
 
+  RedisModuleKey* key = reinterpret_cast<RedisModuleKey*>(
+      RedisModule_OpenKey(ctx, name, REDISMODULE_WRITE));
   // State maintenance.
   if (is_flush) {
 
-  RedisModuleKey* key = reinterpret_cast<RedisModuleKey*>(
-      RedisModule_OpenKey(ctx, name, REDISMODULE_WRITE));
     RedisModule_DeleteKey(key);
     module.sn_to_key().erase(sn);
     // The tail has the responsibility of updating the sn_flushed watermark.
@@ -245,37 +245,42 @@ int Put(RedisModuleCtx* ctx,
       // "sn + 1" is the next sn to be flushed.
       module.Master().SetWatermark(MasterClient::Watermark::kSnFlushed, sn + 1);
     }
-  RedisModule_CloseKey(key);
   } else {
 
-    //RedisModule_StringSet(key, data);
+    RedisModule_StringSet(key, data);
 
-    RedisModuleCallReply* reply =
-    RedisModule_Call(ctx, "SET", "ss", name, data);
-    if (RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_ERROR) {
-      return RedisModule_ReplyWithCallReply(ctx, reply);
-    }
+    // RedisModuleCallReply* reply =
+    // RedisModule_Call(ctx, "SET", "ss", name, data);
+    // if (RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_ERROR) {
+    //   return RedisModule_ReplyWithCallReply(ctx, reply);
+    // }
 
     // NOTE(zongheng): this can be slow, see the note in class declaration.
     // module.sn_to_key()[sn] = k;
     module.record_sn(static_cast<int64_t>(sn));
   }
 
+  RedisModule_CloseKey(key);
   // Protocol.
   const std::string seqnum = std::to_string(sn);
   if (module.ActAsTail()) {
     //LOG(INFO) << "seqnum published " << seqnum;
-    RedisModuleCallReply* reply =
-        RedisModule_Call(ctx, "PUBLISH", "sc", client_id, seqnum.c_str());
-    if (RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_ERROR) {
-      return RedisModule_ReplyWithCallReply(ctx, reply);
-    }
-    if (module.parent()) {
-      reply = RedisModule_Call(ctx, "MEMBER.ACK", "c", seqnum.c_str());
-      if (RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_ERROR) {
-        return RedisModule_ReplyWithCallReply(ctx, reply);
-      }
-    }
+//    RedisModuleCallReply* reply =
+//        RedisModule_Call(ctx, "PUBLISH", "sc", client_id, seqnum.c_str());
+//    if (RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_ERROR) {
+//      return RedisModule_ReplyWithCallReply(ctx, reply);
+//    }
+
+    RedisModuleString* s = RedisModule_CreateString(ctx, seqnum.data(), seqnum.size());
+    RedisModule_Publish(client_id, s);
+    RedisModule_FreeString(ctx, s);
+
+//    if (false&&module.parent()) {
+//      reply = RedisModule_Call(ctx, "MEMBER.ACK", "c", seqnum.c_str());
+//      if (RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_ERROR) {
+//        return RedisModule_ReplyWithCallReply(ctx, reply);
+//      }
+//    }
   } else {
     const std::string v = ReadString(data);
     // NOTE: here we do redisAsyncCommand(child, ...).  However, if the child

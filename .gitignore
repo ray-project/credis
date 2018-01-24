@@ -38,3 +38,4 @@ __pycache__
 # Development-related temp files
 *.log
 callgrind.out.*
+*.sw*

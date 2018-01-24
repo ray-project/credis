@@ -16,7 +16,8 @@
 //
 // If "2" is omitted in the above, by default 1 server is used.
 
-const int N = 500000;
+const int N = 50000;
+//const int N = 500000;
 aeEventLoop* loop = aeCreateEventLoop(64);
 int writes_completed = 0;
 int reads_completed = 0;
@@ -26,6 +27,7 @@ std::string last_issued_read_key;
 std::default_random_engine re;
 double kWriteRatio = 1.0;
 
+const long long kRetryTimerMillisecs = 100;  // For ae's timer.
 double last_unacked_timestamp = -1;
 int64_t last_unacked_seqnum = -1;
 
@@ -151,6 +153,10 @@ void SeqPutAckCallback(redisAsyncContext* ack_context,  // != write_context.
   const redisReply* reply = reinterpret_cast<redisReply*>(r);
   const redisReply* message_type = reply->element[0];
 
+  if (reply == nullptr) {
+    LOG(INFO) << "reply nullptr: " << ack_context->errstr;
+  }
+
   // NOTE(zongheng): this is a hack.
   // if (strcmp(message_type->str, "message") == 0) {
   if (reply->element[2]->str == nullptr) {
@@ -175,7 +181,7 @@ void SeqPutAckCallback(redisAsyncContext* ack_context,  // != write_context.
 }
 
 const double kRetryTimeoutMicrosecs = 500000;
-int RetryPutTimer(aeEventLoop* loop, long long timer_id, void*) {
+int RetryPutTimer(aeEventLoop* loop, long long /*timer_id*/, void*) {
   const double now_us = timer.NowMicrosecs();
   const double diff = now_us - last_unacked_timestamp;
   if (last_unacked_timestamp > 0 && diff > kRetryTimeoutMicrosecs) {
@@ -183,12 +189,15 @@ int RetryPutTimer(aeEventLoop* loop, long long timer_id, void*) {
     LOG(INFO) << " time diff " << diff << "; last_unacked_seqnum "
               << last_unacked_seqnum;
     // If the ACK comes back later, we should ignore it.
-    auto it = assigned_seqnums.find(last_unacked_seqnum);
-    CHECK(it != assigned_seqnums.end());
-    assigned_seqnums.erase(it);
+    if (last_unacked_seqnum >= 0) {
+        auto it = assigned_seqnums.find(last_unacked_seqnum);
+        CHECK(it != assigned_seqnums.end());
+        assigned_seqnums.erase(it);
+        last_unacked_seqnum = -1;
+    }
     AsyncPut(/*is_retry=*/true);
   }
-  return 0;  // Reset timer to 0.
+  return kRetryTimerMillisecs;  // Reset timer to 0.
 }
 
 int main(int argc, char** argv) {
@@ -196,15 +205,17 @@ int main(int argc, char** argv) {
   int num_chain_nodes = 1;
   if (argc > 1) num_chain_nodes = std::stoi(argv[1]);
   if (argc > 2) kWriteRatio = std::stod(argv[2]);
+  std::string server = "127.0.0.1";
+  if (argc > 3) server = std::string(argv[3]);
   // Set up "write_port" and "ack_port".
   const int write_port = 6370;
   const int ack_port = write_port + num_chain_nodes - 1;
   LOG(INFO) << "num_chain_nodes " << num_chain_nodes << " write_port "
             << write_port << " ack_port " << ack_port << " write_ratio "
-            << kWriteRatio;
+            << kWriteRatio << " server " << server;
 
   RedisClient client;
-  CHECK(client.Connect("127.0.0.1", write_port, ack_port).ok());
+  CHECK(client.Connect(server, write_port, ack_port).ok());
   CHECK(client.AttachToEventLoop(loop).ok());
   CHECK(client
             .RegisterAckCallback(
@@ -216,7 +227,7 @@ int main(int argc, char** argv) {
   // Timings related.
   timer.ExpectOps(N);
 
-  aeCreateTimeEvent(loop, /*milliseconds=*/100, &RetryPutTimer, NULL, NULL);
+  aeCreateTimeEvent(loop, /*milliseconds=*/kRetryTimerMillisecs, &RetryPutTimer, NULL, NULL);
 
   std::this_thread::sleep_for(std::chrono::seconds(1));
   LOG(INFO) << "starting bench";

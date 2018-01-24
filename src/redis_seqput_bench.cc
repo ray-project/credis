@@ -8,7 +8,8 @@
 #include "client.h"
 #include "timer.h"
 
-const int N = 500000;
+const int N = 50000;
+//const int N = 500000;
 aeEventLoop* loop = aeCreateEventLoop(64);
 int writes_completed = 0;
 int reads_completed = 0;
@@ -96,9 +97,11 @@ void AsyncGet(redisAsyncContext* context) {
 int main(int argc, char** argv) {
   // Parse.
   if (argc > 1) kWriteRatio = std::stod(argv[1]);
+  std::string server = "127.0.0.1";
+  if (argc > 2) server = std::string(argv[2]);
 
   RedisClient client;
-  client.Connect("127.0.0.1", 6370);
+  client.Connect(server, 6370);
   client.AttachToEventLoop(loop);
   redisAsyncContext* context = client.write_context();
 

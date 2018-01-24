@@ -7,9 +7,13 @@ extern "C" {
 #include "hiredis/hiredis.h"
 }
 
+const char* ReadString(const RedisModuleString* str, size_t* len) {
+  return RedisModule_StringPtrLen(str, len);
+}
+
 std::string ReadString(RedisModuleString* str) {
   size_t l = 0;
-  const char* s = RedisModule_StringPtrLen(str, &l);
+  const char* s = ReadString(str, &l);
   return std::string(s, l);
 }
 

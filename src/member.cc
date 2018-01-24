@@ -449,12 +449,12 @@ int MemberPut_RedisCommand(RedisModuleCtx* ctx,
     if (!module.DropWrites()) {
       const long long sn = module.inc_sn();
       // Return the sequence number
-      // RedisModule_ReplyWithLongLong(ctx, sn);
+      RedisModule_ReplyWithLongLong(ctx, sn);
 
       // TODO(zongheng): which one is faster?
-      const std::string sn_string = std::to_string(sn);
-      RedisModule_ReplyWithStringBuffer(ctx, sn_string.data(),
-                                        sn_string.size());
+      //const std::string sn_string = std::to_string(sn);
+      //RedisModule_ReplyWithStringBuffer(ctx, sn_string.data(),
+      //                                  sn_string.size());
 
       // LOG(INFO) << "MemberPut, assigning new sn " << sn;
       return Put(ctx, argv[1], argv[2], argv[3], sn,

@@ -16,7 +16,9 @@ function setup() {
     port=6369
     for i in $(seq 1 $NUM_NODES); do
       port=$(expr $port + 1)
-      #LD_PRELOAD=/usr/lib/libprofiler.so CPUPROFILE=/tmp/pprof ./redis/src/redis-server --loadmodule ./build/src/libmember.so --port $port &> $port.log &
+      #LD_PRELOAD=/usr/lib/libprofiler.so CPUPROFILE=/tmp/pprof-${i} \
+      #  ./redis/src/redis-server --loadmodule ./build/src/libmember.so \
+      #  --protected-mode no --port $port &> $port.log &
       ./redis/src/redis-server --loadmodule ./build/src/libmember.so --port $port --protected-mode no &> $port.log &
       sleep 0.5
       ./redis/src/redis-cli -p 6369 MASTER.ADD 127.0.0.1 $port

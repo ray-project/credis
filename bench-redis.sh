@@ -23,6 +23,20 @@ for i in $(seq 1 $NUM_CLIENTS); do
 done
 wait
 
-thput=$(grep throughput client*.log | tr -s ' ' | cut -d' ' -f 11 | sort -n | tail -n1 | awk -v N=$NUM_CLIENTS '{time=$1/1000} END {print 500000*N/time}')
-latency=$(grep latency client*.log | tr -s ' ' | cut -d' ' -f 8 | awk '{s += $1} END {print s/NR}')
-echo "$NUM_CLIENTS $thput $latency" >> redis-wr${WRITE_RATIO}.txt
+logs="client*.log"
+outfile="redis-wr${WRITE_RATIO}"
+
+# Composite
+thput=$(grep throughput ${logs} | tr -s ' ' | cut -d' ' -f 11 | sort -n | tail -n1 | awk -v N=$NUM_CLIENTS '{time=$1/1000} END {print 50000*N/time}')
+latency=$(grep latency ${logs} | tr -s ' ' | cut -d' ' -f 8 | awk  -v N=$NUM_CLIENTS '{s += $1} END {print s/N}')
+echo "$NUM_CLIENTS $thput $latency" >> ${outfile}.txt
+
+# Reads.
+read_thput=$(grep reads_thput ${logs} | tr -s ' ' | cut -d' ' -f 6 | awk '{s+=$1} END {print s}')  # Thput ~= sum(client_i's read_thput)
+read_latency=$(grep reads_lat ${logs} | tr -s ' ' | cut -d' ' -f 8 | awk -v N=$NUM_CLIENTS '{s += $1} END {print s/N}')  # Latency ~= sum(client_i's read_lat) / num_clients
+echo "$NUM_CLIENTS $read_thput $read_latency" >> ${outfile}-readsportion.txt
+
+# Writes
+write_thput=$(grep writes_thput ${logs} | tr -s ' ' | cut -d' ' -f 6 | awk '{s+=$1} END {print s}')  # Thput ~= sum(client_i's write_thput)
+write_latency=$(grep writes_lat ${logs} | tr -s ' ' | cut -d' ' -f 8 | awk -v N=$NUM_CLIENTS '{s += $1} END {print s/N}')  # Latency ~= sum(client_i's write_lat) / num_clients
+echo "$NUM_CLIENTS $write_thput $write_latency" >> ${outfile}-writesportion.txt

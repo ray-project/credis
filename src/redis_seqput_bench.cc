@@ -9,11 +9,11 @@
 #include "timer.h"
 
 const int N = 50000;
-//const int N = 500000;
+// const int N = 500000;
 aeEventLoop* loop = aeCreateEventLoop(64);
 int writes_completed = 0;
 int reads_completed = 0;
-Timer timer;
+Timer reads_timer, writes_timer;
 std::string last_issued_read_key;
 // Randomness.
 std::default_random_engine re;
@@ -26,7 +26,7 @@ void AsyncRandomCommand(redisAsyncContext*);
 
 void SeqPutCallback(redisAsyncContext* context, void*, void*) {
   ++writes_completed;
-  timer.TimeOpEnd(writes_completed + reads_completed);
+  writes_timer.TimeOpEnd(writes_completed);
   if (writes_completed + reads_completed == N) {
     aeStop(loop);
     return;
@@ -43,7 +43,7 @@ void SeqGetCallback(redisAsyncContext* context, void* r, void* /*privdata*/) {
   const std::string actual = std::string(reply->str, reply->len);
   CHECK(last_issued_read_key == actual)
       << "; expected " << last_issued_read_key << " actual " << actual;
-  timer.TimeOpEnd(writes_completed + reads_completed);
+  reads_timer.TimeOpEnd(reads_completed);
   if (writes_completed + reads_completed == N) {
     aeStop(loop);
     return;
@@ -68,7 +68,7 @@ void AsyncRandomCommand(redisAsyncContext* context) {
 void AsyncPut(redisAsyncContext* context) {
   const std::string data = std::to_string(writes_completed);
   // LOG(INFO) << "PUT " << data;
-  timer.TimeOpBegin();
+  writes_timer.TimeOpBegin();
   const int status = redisAsyncCommand(
       context, reinterpret_cast<redisCallbackFn*>(&SeqPutCallback),
       /*privdata=*/NULL, "SET %b %b", data.data(), data.size(), data.data(),
@@ -86,7 +86,7 @@ void AsyncGet(redisAsyncContext* context) {
   const std::string query = std::to_string(r);
   last_issued_read_key = query;
 
-  timer.TimeOpBegin();
+  reads_timer.TimeOpBegin();
   // LOG(INFO) << "GET " << query;
   const int status = redisAsyncCommand(
       context, reinterpret_cast<redisCallbackFn*>(&SeqGetCallback),
@@ -105,7 +105,8 @@ int main(int argc, char** argv) {
   client.AttachToEventLoop(loop);
   redisAsyncContext* context = client.write_context();
 
-  timer.ExpectOps(N);
+  reads_timer.ExpectOps(N);
+  writes_timer.ExpectOps(N);
   LOG(INFO) << "starting bench, write_ratio: " << kWriteRatio;
   auto start = std::chrono::system_clock::now();
 
@@ -117,21 +118,41 @@ int main(int argc, char** argv) {
   auto end = std::chrono::system_clock::now();
   CHECK(writes_completed + reads_completed == N);
   LOG(INFO) << "ending bench";
-
   const int64_t latency_us =
       std::chrono::duration_cast<std::chrono::microseconds>(end - start)
           .count();
+
+  // Timings related.
+  Timer merged = Timer::Merge(reads_timer, writes_timer);
+  double composite_mean = 0, composite_std = 0;
+  merged.Stats(&composite_mean, &composite_std);
+  double reads_mean = 0, reads_std = 0;
+  reads_timer.Stats(&reads_mean, &reads_std);
+  double writes_mean = 0, writes_std = 0;
+  writes_timer.Stats(&writes_mean, &writes_std);
+
   LOG(INFO) << "throughput " << N * 1e6 / latency_us
             << " ops/s, total duration (ms) " << latency_us / 1e3 << ", num "
             << N << ", write_ratio " << kWriteRatio;
+  LOG(INFO) << "reads_thput "
+            << reads_completed * 1e6 / (reads_mean * reads_completed)
+            << " ops/s, total duration(ms) "
+            << (reads_mean * reads_completed) / 1e3 << ", num "
+            << reads_completed;
+  LOG(INFO) << "writes_thput "
+            << writes_completed * 1e6 / (writes_mean * writes_completed)
+            << " ops/s, total duration(ms) "
+            << (writes_mean * writes_completed) / 1e3 << ", num "
+            << writes_completed;
 
-  double mean = 0, std = 0;
-  timer.Stats(&mean, &std);
-  LOG(INFO) << "latency (us) mean " << mean << " std " << std;
-  {
-    std::ofstream ofs("redis-latency.txt");
-    for (double x : timer.latency_micros()) ofs << x << std::endl;
-  }
+  LOG(INFO) << "latency (us) mean " << composite_mean << " std "
+            << composite_std;
+  LOG(INFO) << "reads_lat (us) mean " << reads_mean << " std " << reads_std;
+  LOG(INFO) << "writes_lat (us) mean " << writes_mean << " std " << writes_std;
+  // {
+  //   std::ofstream ofs("redis-latency.txt");
+  //   for (double x : timer.latency_micros()) ofs << x << std::endl;
+  // }
 
   return 0;
 }

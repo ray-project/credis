@@ -17,11 +17,11 @@
 // If "2" is omitted in the above, by default 1 server is used.
 
 const int N = 50000;
-//const int N = 500000;
+// const int N = 500000;
 aeEventLoop* loop = aeCreateEventLoop(64);
 int writes_completed = 0;
 int reads_completed = 0;
-Timer timer;
+Timer reads_timer, writes_timer;
 std::string last_issued_read_key;
 // Randomness.
 std::default_random_engine re;
@@ -59,11 +59,11 @@ void AsyncRandomCommand() {
   }
 }
 
-void OnCompleteLaunchNext(int* cnt, int other_cnt) {
+void OnCompleteLaunchNext(Timer* timer, int* cnt, int other_cnt) {
   // Sometimes an ACK comes back late, just ignore if we're done.
   if (*cnt + other_cnt >= N) return;
   ++(*cnt);
-  timer.TimeOpEnd(*cnt + other_cnt);
+  timer->TimeOpEnd(*cnt);
   if (*cnt + other_cnt == N) {
     aeStop(loop);
     return;
@@ -85,7 +85,7 @@ void SeqPutCallback(redisAsyncContext* write_context,  // != ack_context.
     acked_seqnums.erase(it);
     last_unacked_timestamp = -1;
     last_unacked_seqnum = -1;
-    OnCompleteLaunchNext(&writes_completed, reads_completed);
+    OnCompleteLaunchNext(&writes_timer, &writes_completed, reads_completed);
   } else {
     last_unacked_seqnum = assigned_seqnum;
     assigned_seqnums.insert(assigned_seqnum);
@@ -96,7 +96,7 @@ void SeqPutCallback(redisAsyncContext* write_context,  // != ack_context.
 void AsyncPut(bool is_retry) {
   const std::string data = std::to_string(writes_completed);
   // LOG(INFO) << "PUT " << data;
-  if (!is_retry) last_unacked_timestamp = timer.TimeOpBegin();
+  if (!is_retry) last_unacked_timestamp = writes_timer.TimeOpBegin();
   const int status = redisAsyncCommand(
       write_context, &SeqPutCallback,
       /*privdata=*/NULL, "MEMBER.PUT %b %b %b", data.data(), data.size(),
@@ -114,7 +114,7 @@ void AsyncGet() {
   const std::string query = std::to_string(r);
   last_issued_read_key = query;
 
-  timer.TimeOpBegin();
+  reads_timer.TimeOpBegin();
   // LOG(INFO) << "GET " << query;
   const int status = redisAsyncCommand(
       read_context, reinterpret_cast<redisCallbackFn*>(&SeqGetCallback),
@@ -131,7 +131,7 @@ void SeqGetCallback(redisAsyncContext* /*context*/,
   const std::string actual = std::string(reply->str, reply->len);
   CHECK(last_issued_read_key == actual)
       << "; expected " << last_issued_read_key << " actual " << actual;
-  OnCompleteLaunchNext(&reads_completed, writes_completed);
+  OnCompleteLaunchNext(&reads_timer, &reads_completed, writes_completed);
 }
 
 // This gets fired whenever an ACK from the store comes back.
@@ -177,12 +177,12 @@ void SeqPutAckCallback(redisAsyncContext* ack_context,  // != write_context.
   assigned_seqnums.erase(it);
   last_unacked_timestamp = -1;
   last_unacked_seqnum = -1;
-  OnCompleteLaunchNext(&writes_completed, reads_completed);
+  OnCompleteLaunchNext(&writes_timer, &writes_completed, reads_completed);
 }
 
 const double kRetryTimeoutMicrosecs = 500000;
 int RetryPutTimer(aeEventLoop* loop, long long /*timer_id*/, void*) {
-  const double now_us = timer.NowMicrosecs();
+  const double now_us = writes_timer.NowMicrosecs();
   const double diff = now_us - last_unacked_timestamp;
   if (last_unacked_timestamp > 0 && diff > kRetryTimeoutMicrosecs) {
     LOG(INFO) << "Retrying PUT " << writes_completed;
@@ -190,14 +190,14 @@ int RetryPutTimer(aeEventLoop* loop, long long /*timer_id*/, void*) {
               << last_unacked_seqnum;
     // If the ACK comes back later, we should ignore it.
     if (last_unacked_seqnum >= 0) {
-        auto it = assigned_seqnums.find(last_unacked_seqnum);
-        CHECK(it != assigned_seqnums.end());
-        assigned_seqnums.erase(it);
-        last_unacked_seqnum = -1;
+      auto it = assigned_seqnums.find(last_unacked_seqnum);
+      CHECK(it != assigned_seqnums.end());
+      assigned_seqnums.erase(it);
+      last_unacked_seqnum = -1;
     }
     AsyncPut(/*is_retry=*/true);
   }
-  return kRetryTimerMillisecs;  // Reset timer to 0.
+  return kRetryTimerMillisecs;  // Reset ae's timer to 0.
 }
 
 int main(int argc, char** argv) {
@@ -225,9 +225,11 @@ int main(int argc, char** argv) {
   read_context = client.read_context();
 
   // Timings related.
-  timer.ExpectOps(N);
+  reads_timer.ExpectOps(N);
+  writes_timer.ExpectOps(N);
 
-  aeCreateTimeEvent(loop, /*milliseconds=*/kRetryTimerMillisecs, &RetryPutTimer, NULL, NULL);
+  aeCreateTimeEvent(loop, /*milliseconds=*/kRetryTimerMillisecs, &RetryPutTimer,
+                    NULL, NULL);
 
   std::this_thread::sleep_for(std::chrono::seconds(1));
   LOG(INFO) << "starting bench";
@@ -236,27 +238,44 @@ int main(int argc, char** argv) {
   // Start with first query, and each callback will launch the next.
   AsyncRandomCommand();
 
-  LOG(INFO) << "start loop";
+  // LOG(INFO) << "start loop";
   aeMain(loop);
-  LOG(INFO) << "end loop";
+  // LOG(INFO) << "end loop";
 
   auto end = std::chrono::system_clock::now();
-  CHECK(writes_completed + reads_completed == N)
-      << "writes_completed + reads_completed "
-      << writes_completed + reads_completed << " vs N " << N;
+  CHECK(writes_completed + reads_completed == N);
   LOG(INFO) << "ending bench";
-
   const int64_t latency_us =
       std::chrono::duration_cast<std::chrono::microseconds>(end - start)
           .count();
+
+  // Timings related.
+  Timer merged = Timer::Merge(reads_timer, writes_timer);
+  double composite_mean = 0, composite_std = 0;
+  merged.Stats(&composite_mean, &composite_std);
+  double reads_mean = 0, reads_std = 0;
+  reads_timer.Stats(&reads_mean, &reads_std);
+  double writes_mean = 0, writes_std = 0;
+  writes_timer.Stats(&writes_mean, &writes_std);
+
   LOG(INFO) << "throughput " << N * 1e6 / latency_us
             << " ops/s, total duration (ms) " << latency_us / 1e3 << ", num "
             << N << ", write_ratio " << kWriteRatio;
+  LOG(INFO) << "reads_thput "
+            << reads_completed * 1e6 / (reads_mean * reads_completed)
+            << " ops/s, total duration(ms) "
+            << (reads_mean * reads_completed) / 1e3 << ", num "
+            << reads_completed;
+  LOG(INFO) << "writes_thput "
+            << writes_completed * 1e6 / (writes_mean * writes_completed)
+            << " ops/s, total duration(ms) "
+            << (writes_mean * writes_completed) / 1e3 << ", num "
+            << writes_completed;
 
-  // Timings related.
-  double mean = 0, std = 0;
-  timer.Stats(&mean, &std);
-  LOG(INFO) << "latency (us) mean " << mean << " std " << std;
+  LOG(INFO) << "latency (us) mean " << composite_mean << " std "
+            << composite_std;
+  LOG(INFO) << "reads_lat (us) mean " << reads_mean << " std " << reads_std;
+  LOG(INFO) << "writes_lat (us) mean " << writes_mean << " std " << writes_std;
   //   {
   //     std::ofstream ofs("latency.txt");
   //     for (double x : timer.latency_micros()) ofs << x << std::endl;

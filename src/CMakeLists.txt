@@ -17,6 +17,11 @@ else()
   set(REDIS_MODULE_LDFLAGS -shared)
 endif()
 
+# timer
+add_library(timer STATIC timer.cc)
+target_compile_options(timer PUBLIC ${REDIS_MODULE_CFLAGS} -fPIC)
+target_link_libraries(timer glog::glog)
+
 # utils
 add_library(utils STATIC utils.cc)
 target_compile_options(utils PUBLIC ${REDIS_MODULE_CFLAGS} -fPIC)
@@ -58,22 +63,22 @@ add_executable(credis_parput_bench credis_parput_bench.cc)
 target_link_libraries(credis_parput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
-  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o tcmalloc)
+  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o tcmalloc timer)
 
 add_executable(credis_seqput_bench credis_seqput_bench.cc)
 target_link_libraries(credis_seqput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
-  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o tcmalloc)
+  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o tcmalloc timer)
 
 add_executable(redis_parput_bench redis_parput_bench.cc)
 target_link_libraries(redis_parput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
-  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o tcmalloc)
+  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o tcmalloc timer)
 
 add_executable(redis_seqput_bench redis_seqput_bench.cc)
 target_link_libraries(redis_seqput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
-  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o tcmalloc)
+  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o tcmalloc timer)

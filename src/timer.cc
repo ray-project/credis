@@ -1,4 +1,5 @@
 #include <cmath>
+#include <string>
 
 #include <sys/time.h>
 #include <time.h>
@@ -66,11 +67,11 @@ std::string Timer::ReportStats(const std::string& name) const {
 
   std::string msg = name;
   msg += " mean ";
-  msg += mean;
+  msg += std::to_string(mean);
   msg += " std ";
-  msg += std;
+  msg += std::to_string(std);
   msg += " num ";
-  msg += latency_micros_.size();
+  msg += std::to_string(latency_micros_.size());
   return msg;
 }
 

@@ -1,18 +1,10 @@
 #!/bin/bash
 set -x
 NUM_CLIENTS=${1:-1}
-NUM_NODES=${2:-1}
-WRITE_RATIO=${3:-1}
-SERVER=${4:-127.0.0.1}
+WRITE_RATIO=${2:-1}
+SERVER=${3:-127.0.0.1}
 
-# Example usage:
-#
-#   # To launch.
-#   pkill -f redis-server; ./setup.sh 2; make -j;
-#   ./seqput.sh 12 2
-#
-#   # To calculate throughput.
-#   grep throughput client<1-12>.log | cut -d' ' -f 11 | sort -n | tail -n1 | awk '{time=$1/1000} END {print 500000*12/time}'
+rm -rf client*.log
 
 pkill -f redis_seqput_bench
 pkill -f credis_seqput_bench
@@ -21,20 +13,18 @@ ssh -o StrictHostKeyChecking=no ubuntu@${SERVER} << EOF
 cd ~/credis-1
 pkill -f redis-server
 sleep 2
-./setup.sh $NUM_NODES
+./setup.sh 1
 sleep 2
 EOF
 
 sleep 4
-
 for i in $(seq 1 $NUM_CLIENTS); do
-  logfile=${NUM_CLIENTS}clients-${i}-chain-${NUM_NODES}node-wr${WRITE_RATIO}.log
-    ./build/src/credis_seqput_bench $NUM_NODES $WRITE_RATIO $SERVER >${logfile} 2>&1 &
+    ./build/src/redis_seqput_bench $WRITE_RATIO $SERVER 2>&1 | tee client$i.log &
 done
 wait
 
-logs="${NUM_CLIENTS}clients-*-chain-${NUM_NODES}node-wr${WRITE_RATIO}.log"
-outfile="chain-${NUM_NODES}node-wr${WRITE_RATIO}"
+logs="client*.log"
+outfile="redis-wr${WRITE_RATIO}"
 
 # Composite
 thput=$(grep throughput ${logs} | tr -s ' ' | cut -d' ' -f 11 | sort -n | tail -n1 | awk -v N=$NUM_CLIENTS '{time=$1/1000} END {print 50000*N/time}')

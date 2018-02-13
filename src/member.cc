@@ -152,7 +152,7 @@ class RedisChainModule {
 
   void SetRole(ChainRole chain_role) { chain_role_ = chain_role; }
   ChainRole Role() const { return chain_role_; }
-  constexpr const char* ChainRoleName() const {
+  const char* ChainRoleName() const {
     return chain_role_ == ChainRole::kSingleton
                ? "SINGLETON"
                : (chain_role_ == ChainRole::kHead
@@ -230,13 +230,10 @@ int Put(RedisModuleCtx* ctx,
         RedisModuleString* client_id,
         long long sn,
         bool is_flush) {
-  RedisModuleKey* key = reinterpret_cast<RedisModuleKey*>(
-      RedisModule_OpenKey(ctx, name, REDISMODULE_WRITE));
-  const std::string k = ReadString(name);
-  // TODO(pcm): error checking
-
   // State maintenance.
   if (is_flush) {
+    RedisModuleKey* key = reinterpret_cast<RedisModuleKey*>(
+        RedisModule_OpenKey(ctx, name, REDISMODULE_WRITE));
     RedisModule_DeleteKey(key);
     module.sn_to_key().erase(sn);
     // The tail has the responsibility of updating the sn_flushed watermark.
@@ -244,44 +241,70 @@ int Put(RedisModuleCtx* ctx,
       // "sn + 1" is the next sn to be flushed.
       module.Master().SetWatermark(MasterClient::Watermark::kSnFlushed, sn + 1);
     }
+    RedisModule_CloseKey(key);
   } else {
+    RedisModuleKey* key = reinterpret_cast<RedisModuleKey*>(
+        RedisModule_OpenKey(ctx, name, REDISMODULE_WRITE));
     RedisModule_StringSet(key, data);
+    RedisModule_CloseKey(key);
+
+    // RedisModuleCallReply* reply =
+    //     RedisModule_Call(ctx, "SET", "ss", name, data);
+    // CHECK(RedisModule_CallReplyType(reply) != REDISMODULE_REPLY_ERROR);
+
+    // const std::string k = ReadString(name);
     // NOTE(zongheng): this can be slow, see the note in class declaration.
-    module.sn_to_key()[sn] = k;
+    // module.sn_to_key()[sn] = k;
     module.record_sn(static_cast<int64_t>(sn));
   }
-  RedisModule_CloseKey(key);
+
+  const std::string seqnum_str = std::to_string(sn);
 
   // Protocol.
-  const std::string seqnum = std::to_string(sn);
   if (module.ActAsTail()) {
-    RedisModuleCallReply* reply =
-        RedisModule_Call(ctx, "PUBLISH", "sc", client_id, seqnum.c_str());
-    if (RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_ERROR) {
-      return RedisModule_ReplyWithCallReply(ctx, reply);
-    }
-    if (module.parent()) {
-      reply = RedisModule_Call(ctx, "MEMBER.ACK", "c", seqnum.c_str());
-      if (RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_ERROR) {
-        return RedisModule_ReplyWithCallReply(ctx, reply);
-      }
-    }
+    // LOG(INFO) << "sn_string published " << sn_string;
+    //    RedisModuleCallReply* reply =
+    //        RedisModule_Call(ctx, "PUBLISH", "sc", client_id,
+    //        sn_string.c_str());
+    //    if (RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_ERROR) {
+    //      return RedisModule_ReplyWithCallReply(ctx, reply);
+    //    }
+
+    RedisModuleString* s =
+        RedisModule_CreateString(ctx, seqnum_str.data(), seqnum_str.size());
+    RedisModule_Publish(client_id, s);
+    RedisModule_FreeString(ctx, s);
+
+    //    if (false&&module.parent()) {
+    //      reply = RedisModule_Call(ctx, "MEMBER.ACK", "c",
+    //      sn_string.c_str()); if (RedisModule_CallReplyType(reply) ==
+    //      REDISMODULE_REPLY_ERROR) {
+    //        return RedisModule_ReplyWithCallReply(ctx, reply);
+    //      }
+    //    }
   } else {
-    const std::string v = ReadString(data);
     // NOTE: here we do redisAsyncCommand(child, ...).  However, if the child
     // crashed before the call, this function non-deterministically crashes
     // with, say, a single digit percent chance.  We guard against this by
     // testing the "err" field first.
     // LOG_EVERY_N(INFO, 999999999) << "Calling MemberPropagate_RedisCommand";
     if (!module.child()->err) {
-      const std::string cid = ReadString(client_id);
+      // Zero-copy.
+      size_t key_len = 0;
+      const char* key_ptr = ReadString(name, &key_len);
+      size_t val_len = 0;
+      const char* val_ptr = ReadString(data, &val_len);
+      size_t cid_len = 0;
+      const char* cid_ptr = ReadString(client_id, &cid_len);
+
       const int status = redisAsyncCommand(
           module.child(), NULL, NULL, "MEMBER.PROPAGATE %b %b %b %s %b",
-          k.data(), k.size(), v.data(), v.size(), seqnum.data(), seqnum.size(),
-          is_flush ? kStringOne : kStringZero, cid.data(), cid.size());
+          key_ptr, key_len, val_ptr, val_len, seqnum_str.data(),
+          seqnum_str.size(), is_flush ? kStringOne : kStringZero, cid_ptr,
+          cid_len);
       // TODO(zongheng): check status.
       // LOG_EVERY_N(INFO, 999999999) << "Done";
-      module.sent().insert(sn);
+      // module.sent().insert(sn);
     } else {
       // TODO(zongheng): this case is incompletely handled, i.e. "failure of a
       // middle server".  To handle this the Sent list data structure needs to
@@ -295,8 +318,10 @@ int Put(RedisModuleCtx* ctx,
       // TODO(zongheng): is it okay to reply SN to client in this case as well?
     }
   }
+  // TODO: is this needed?!
   // Return the sequence number
-  RedisModule_ReplyWithLongLong(ctx, sn);
+  // if (!module.ActAsHead()) {RedisModule_ReplyWithNull(ctx);}
+  // RedisModule_ReplyWithLongLong(ctx,sn);
   return REDISMODULE_OK;
 }
 
@@ -423,8 +448,17 @@ int MemberPut_RedisCommand(RedisModuleCtx* ctx,
     // LOG(INFO) << "MemberPut";
     if (!module.DropWrites()) {
       const long long sn = module.inc_sn();
+      // Return the sequence number
+      RedisModule_ReplyWithLongLong(ctx, sn);
+
+      // TODO(zongheng): which one is faster?
+      //const std::string sn_string = std::to_string(sn);
+      //RedisModule_ReplyWithStringBuffer(ctx, sn_string.data(),
+      //                                  sn_string.size());
+
       // LOG(INFO) << "MemberPut, assigning new sn " << sn;
-      return Put(ctx, argv[1], argv[2], argv[3], sn, /*is_flush=*/false);
+      return Put(ctx, argv[1], argv[2], argv[3], sn,
+                 /*is_flush=*/false);
     } else {
       // The store, by contract, is allowed to ignore writes during faults.
       return RedisModule_ReplyWithNull(ctx);
@@ -543,14 +577,15 @@ int MemberAck_RedisCommand(RedisModuleCtx* ctx,
   std::string sn = ReadString(argv[1]);
   // LOG_EVERY_N(INFO, 999999999)
   //     << "Erasing sequence number " << sn << " from sent list";
-  module.sent().erase(std::stoi(sn));
+  // module.sent().erase(std::stoi(sn));
   if (module.parent()) {
     // LOG_EVERY_N(INFO, 999999999) << "Propagating the ACK up the chain";
     const int status = redisAsyncCommand(module.parent(), NULL, NULL,
                                          "MEMBER.ACK %b", sn.data(), sn.size());
     // TODO(zongheng): check status.
   }
-  RedisModule_ReplyWithNull(ctx);
+  // TODO: is this needed?
+  // RedisModule_ReplyWithNull(ctx);
   return REDISMODULE_OK;
 }
 

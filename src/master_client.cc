@@ -9,7 +9,7 @@ Status MasterClient::Connect(const std::string& address, int port) {
   return Status::OK();
 }
 
-constexpr const char* MasterClient::WatermarkKey(Watermark w) const {
+const char* MasterClient::WatermarkKey(Watermark w) const {
   return w == MasterClient::Watermark::kSnCkpt ? "_sn_ckpt" : "_sn_flushed";
 }
 

@@ -10,6 +10,7 @@ extern "C" {
 }
 
 // Convert RedisModuleString to C++ string.
+const char* ReadString(const RedisModuleString* str, size_t* len);
 std::string ReadString(RedisModuleString* str);
 
 // On success, returns a synchronous redisContext client; else exit(1).

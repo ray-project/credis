@@ -1,6 +1,7 @@
 // TODO(zongheng): this benchmark is likely outdated and needs fixes.
 
 #include <chrono>
+#include <cmath>
 #include <vector>
 
 #include "glog/logging.h"
@@ -71,7 +72,7 @@ int main() {
   client.Connect("127.0.0.1", 6370);
   client.AttachToEventLoop(loop);
   client.RegisterAckCallback(&ParallelPutAckCallback);
-  write_context = client.async_context();
+  write_context = client.write_context();
 
   int num_calls = 0;
   // const int N = 5000;

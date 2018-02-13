@@ -6,7 +6,10 @@
 git submodule init
 git submodule update
 
-pushd redis && make -j && popd
+# Install tcmalloc according to
+# https://github.com/gperftools/gperftools/blob/master/INSTALL
+
+pushd redis && env USE_TCMALLOC=yes make -j && popd
 pushd glog && cmake . && make -j install && popd
 pushd leveldb && make -j && popd
 

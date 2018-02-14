@@ -13,6 +13,11 @@ INIT_PORTS = [6369, 6370, 6371]
 PORTS = list(INIT_PORTS)
 MAX_USED_PORT = max(PORTS)  # For picking the next port.
 
+# GCS modes.
+GCS_NORMAL = 0
+GCS_CKPTONLY = 1
+GCS_CKPTFLUSH = 2
+
 
 def MakeChain(num_nodes=2):
     global PORTS
@@ -45,7 +50,7 @@ def KillNode(index=None, port=None):
         del PORTS[PORTS.index(port)]
 
 
-def AddNode(master_client, port=None):
+def AddNode(master_client, port=None, gcs_mode=GCS_NORMAL):
     global PORTS
     global MAX_USED_PORT
     if port is not None:
@@ -56,11 +61,19 @@ def AddNode(master_client, port=None):
         new_port = MAX_USED_PORT + 1
         MAX_USED_PORT += 1
     print('launching redis-server --port %d' % new_port)
-    member = subprocess.Popen([
-        "redis/src/redis-server", "--loadmodule", "build/src/libmember.so",
-        "--port",
-        str(new_port)
-    ], )
+
+    with open("%d.log" % new_port, 'w') as output:
+        member = subprocess.Popen(
+            [
+                "redis/src/redis-server",
+                "--loadmodule",
+                "build/src/libmember.so",
+                str(gcs_mode),
+                "--port",
+                str(new_port),
+            ],
+            stdout=output,
+            stderr=output)
     time.sleep(0.1)
     print('calling master add, new_port %s' % new_port)
     master_client.execute_command("MASTER.ADD", "127.0.0.1", str(new_port))
@@ -69,7 +82,7 @@ def AddNode(master_client, port=None):
     return member, new_port
 
 
-def Start(request=None, chain=INIT_PORTS):
+def Start(request=None, chain=INIT_PORTS, gcs_mode=GCS_NORMAL):
     global PORTS
     global MAX_USED_PORT
     PORTS = list(chain)
@@ -78,11 +91,18 @@ def Start(request=None, chain=INIT_PORTS):
     print('Setting up initial chain: %s' % INIT_PORTS)
 
     subprocess.Popen(["pkill", "-9", "redis-server.*"]).wait()
-    master = subprocess.Popen([
-        "redis/src/redis-server", "--loadmodule", "build/src/libmaster.so",
-        "--port",
-        str(PORTS[0])
-    ])
+    with open("%d.log" % PORTS[0], 'w') as output:
+        master = subprocess.Popen(
+            [
+                "redis/src/redis-server",
+                "--loadmodule",
+                "build/src/libmaster.so",
+                str(gcs_mode),
+                "--port",
+                str(PORTS[0]),
+            ],
+            stdout=output,
+            stderr=output)
     if request is not None:
         request.addfinalizer(master.kill)
     master_client = redis.StrictRedis("127.0.0.1", PORTS[0])
@@ -93,9 +113,9 @@ def Start(request=None, chain=INIT_PORTS):
             request.addfinalizer(member.kill)
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture(scope='function', autouse=True, params=[GCS_NORMAL])
 def startcredis(request):
-    Start(request)
+    Start(request, gcs_mode=request.param)
 
 
 def AckClient():

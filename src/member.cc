@@ -86,6 +86,7 @@ int HandleNonOk(RedisModuleCtx* ctx, Status s) {
 
 class RedisChainModule {
  public:
+  // Public enums.
   enum class ChainRole : int {
     // 1-node chain: serves reads and writes.
     kSingleton = 0,
@@ -103,8 +104,39 @@ class RedisChainModule {
            chain_role_ == ChainRole::kTail;
   }
 
+  enum class GcsMode : int {
+    kNormal = 0,     // (Default) No checkpointing, no flushing.
+    kCkptOnly = 1,   // Checkpointing on; flushing off.
+    kCkptFlush = 2,  // Both checkpointing & flushing on.
+  };
+  GcsMode Mode() const {
+    CHECK(gcs_mode_initialized_);
+    return gcs_mode_;
+  }
+  // Initialized on module startup; immutable afterwards.
+  void SetGcsMode(GcsMode mode) {
+    CHECK(!gcs_mode_initialized_);
+    gcs_mode_ = mode;
+    gcs_mode_initialized_ = true;
+  }
+  std::string GcsModeString() const {
+    switch (gcs_mode_) {
+    case GcsMode::kNormal:
+      return "kNormal";
+    case GcsMode::kCkptOnly:
+      return "kCkptOnly";
+    case GcsMode::kCkptFlush:
+      return "kCkptFlush";
+    default:
+      CHECK(false);
+    }
+  }
+
   RedisChainModule()
-      : chain_role_(ChainRole::kSingleton), parent_(NULL), child_(NULL) {}
+      : chain_role_(ChainRole::kSingleton),
+        gcs_mode_(GcsMode::kNormal),
+        parent_(NULL),
+        child_(NULL) {}
 
   ~RedisChainModule() {
     if (child_) redisAsyncFree(child_);
@@ -184,6 +216,9 @@ class RedisChainModule {
   bool DropWrites() const { return drop_writes_; }
   void SetDropWrites(bool b) { drop_writes_ = b; }
 
+  // Remove from sn_to_key all key s <= sn.
+  void DoCleanupSnToKey(int64_t sn);
+
  private:
   std::string prev_address_;
   std::string prev_port_;
@@ -193,6 +228,9 @@ class RedisChainModule {
   MasterClient master_client_;
 
   ChainRole chain_role_;
+  GcsMode gcs_mode_;
+  bool gcs_mode_initialized_ = false;  // To guard against re-initialization.
+
   // The previous node in the chain (or NULL if none)
   redisAsyncContext* parent_;
   // The next node in the chain (or NULL if none)
@@ -214,6 +252,14 @@ class RedisChainModule {
 };
 
 RedisChainModule module;
+
+void RedisChainModule::DoCleanupSnToKey(int64_t sn) {
+  auto& map = module.sn_to_key();
+  auto iter_upper = map.upper_bound(sn);
+  const size_t old = map.size();
+  map.erase(map.begin(), iter_upper);
+  LOG(INFO) << "Erased from sn_to_key " << map.size() - old << " entries";
+}
 
 // Helper function to handle updates locally.
 //
@@ -248,12 +294,13 @@ int Put(RedisModuleCtx* ctx,
     RedisModule_StringSet(key, data);
     RedisModule_CloseKey(key);
 
-    // RedisModuleCallReply* reply =
-    //     RedisModule_Call(ctx, "SET", "ss", name, data);
-    // CHECK(RedisModule_CallReplyType(reply) != REDISMODULE_REPLY_ERROR);
-
     // NOTE(zongheng): this can be slow, see the note in class declaration.
+    // NOTE(zongheng): sn_to_key is needed for all execution modes (in normal,
+    // needed for node addition codepath).
     module.sn_to_key()[sn] = ReadString(name);
+    if (module.Mode() == RedisChainModule::GcsMode::kCkptFlush) {
+      // TODO(zongheng): key_to_sn;
+    }
     module.record_sn(static_cast<int64_t>(sn));
   }
 
@@ -387,6 +434,7 @@ int MemberSetRole_RedisCommand(RedisModuleCtx* ctx,
 
   const int64_t first_sn = std::stoi(ReadString(argv[6]));
   const bool drop_writes = std::stoi(ReadString(argv[7])) ? true : false;
+  LOG(INFO) << "In MemberSetRole drop_writes: " << drop_writes;
   if (drop_writes) module.SetDropWrites(drop_writes);
 
   // TODO(zongheng): I don't understand why we do this.
@@ -469,33 +517,6 @@ int MemberPut_RedisCommand(RedisModuleCtx* ctx,
   }
 }
 
-// Put a key.  No propagation.
-// argv[1]: key
-// argv[2]: val
-// argv[3]: sn
-int MemberNoPropPut_RedisCommand(RedisModuleCtx* ctx,
-                                 RedisModuleString** argv,
-                                 int argc) {
-  if (argc != 4) {
-    return RedisModule_WrongArity(ctx);
-  }
-  long long sn = -1;
-  RedisModule_StringToLongLong(argv[3], &sn);
-  CHECK(!module.DropWrites());
-  CHECK(sn >= 0);
-
-  // No propagation: just state maintenance.
-  RedisModuleKey* key = reinterpret_cast<RedisModuleKey*>(
-      RedisModule_OpenKey(ctx, argv[1], REDISMODULE_WRITE));
-  RedisModule_StringSet(key, argv[2]);
-  RedisModule_CloseKey(key);
-
-  module.sn_to_key()[sn] = ReadString(argv[1]);
-  module.record_sn(static_cast<int64_t>(sn));
-
-  return RedisModule_ReplyWithNull(ctx);
-}
-
 // Propagate a put request down the chain
 // argv[1] is the key for the data
 // argv[2] is the data
@@ -523,7 +544,42 @@ int MemberPropagate_RedisCommand(RedisModuleCtx* ctx,
   }
 }
 
-// Replicate our content to our child
+// Put a key.  No propagation.
+
+// This command is used when ME is being added as the new tail of the whole
+// chain -- i.e., fill the contents of ME.  The caller is MemberReplicate.
+
+// argv[1]: key
+// argv[2]: val
+// argv[3]: sn
+int MemberNoPropPut_RedisCommand(RedisModuleCtx* ctx,
+                                 RedisModuleString** argv,
+                                 int argc) {
+  if (argc != 4) {
+    return RedisModule_WrongArity(ctx);
+  }
+  long long sn = -1;
+  RedisModule_StringToLongLong(argv[3], &sn);
+  CHECK(!module.DropWrites());
+  CHECK(sn >= 0);
+
+  // Redis state.
+  // No propagation: just state maintenance.
+  RedisModuleKey* key = reinterpret_cast<RedisModuleKey*>(
+      RedisModule_OpenKey(ctx, argv[1], REDISMODULE_WRITE));
+  RedisModule_StringSet(key, argv[2]);
+  RedisModule_CloseKey(key);
+
+  // Chain metadata state.
+  module.sn_to_key()[sn] = ReadString(argv[1]);
+  module.record_sn(static_cast<int64_t>(sn));
+
+  return RedisModule_ReplyWithNull(ctx);
+}
+
+// Replicate our content to our child.  This command is used when a node is
+// being added as the new tail of the whole chain.
+
 // NOTE: with Sent_T handling this can be asynchronous (in the tail-add path);
 // however without handling Sent_T this function should probably be synchronous.
 int MemberReplicate_RedisCommand(RedisModuleCtx* ctx,
@@ -535,7 +591,11 @@ int MemberReplicate_RedisCommand(RedisModuleCtx* ctx,
   }
 
   if (module.child()) {
-    // LOG_EVERY_N(INFO, 999999999) << "Called replicate.";
+    LOG_EVERY_N(INFO, 1) << "Called replicate. sn_to_key size "
+                         << module.sn_to_key().size();
+    // TODO(zongheng): think about sn_to_key lifecycle.  Ckpt -> some entries in
+    // the map get removed -> then this function gets called because of a new
+    // tail, is it still correct?
     for (auto element : module.sn_to_key()) {
       KeyReader reader(ctx, element.second);
       size_t key_size, value_size;
@@ -595,6 +655,7 @@ int MemberUnblockWrites_RedisCommand(RedisModuleCtx* ctx,
                                      int argc) {
   REDISMODULE_NOT_USED(argv);
   if (argc != 1) return RedisModule_WrongArity(ctx);
+  LOG(INFO) << "Unblocking writes";
   module.SetDropWrites(false);
   return RedisModule_ReplyWithNull(ctx);
 }
@@ -614,6 +675,10 @@ int TailCheckpoint_RedisCommand(RedisModuleCtx* ctx,
   if (!module.ActAsTail()) {
     return RedisModule_ReplyWithError(
         ctx, "ERR this command must be called on the tail.");
+  }
+  if (module.Mode() == RedisChainModule::GcsMode::kNormal) {
+    return RedisModule_ReplyWithError(
+        ctx, "ERR redis server's GcsMode is set to kNormal.");
   }
 
   // TODO(zongheng): the following checkpoints the range [sn_ckpt, sn_latest],
@@ -642,7 +707,7 @@ int TailCheckpoint_RedisCommand(RedisModuleCtx* ctx,
     vals_to_write.emplace_back(std::string(value, size));
   }
 
-  // Actually write this out.
+  // Batch the writes.
   leveldb::WriteBatch batch;
   for (size_t i = 0; i < keys_to_write.size(); ++i) {
     batch.Put(keys_to_write[i], vals_to_write[i]);
@@ -678,12 +743,18 @@ int HeadFlush_RedisCommand(RedisModuleCtx* ctx,
     return RedisModule_ReplyWithError(
         ctx, "ERR this command must be called on the head.");
   }
+  if (module.Mode() != RedisChainModule::GcsMode::kCkptFlush) {
+    return RedisModule_ReplyWithError(
+        ctx, "ERR redis server's GcsMode is NOT set to kCkptFlush.");
+  }
 
   // Read watermarks from master.
   // Clearly, we can provide a batch iface.
   int64_t sn_ckpt = 0, sn_flushed = 0;
+  LOG(INFO) << "Getting watermark 1";
   HandleNonOk(ctx, module.Master().GetWatermark(
                        MasterClient::Watermark::kSnCkpt, &sn_ckpt));
+  LOG(INFO) << "Getting watermark 2";
   HandleNonOk(ctx, module.Master().GetWatermark(
                        MasterClient::Watermark::kSnFlushed, &sn_flushed));
   // LOG_EVERY_N(INFO, 999999999)
@@ -790,16 +861,41 @@ int MemberSn_RedisCommand(RedisModuleCtx* ctx,
 
 extern "C" {
 
+// Optional argument:
+//   argv[0] indicates the GcsMode: 0 for kNormal, 1 kCkptOnly, 2 kCkptFlush.
+// If not specified, defaults to kNormal (checkpointing and flushing turned
+// off).
 int RedisModule_OnLoad(RedisModuleCtx* ctx,
                        RedisModuleString** argv,
                        int argc) {
-  REDISMODULE_NOT_USED(argc);
-  REDISMODULE_NOT_USED(argv);
-
+  // Init.  Must be at the top.
   if (RedisModule_Init(ctx, "MEMBER", 1, REDISMODULE_APIVER_1) ==
       REDISMODULE_ERR) {
     return REDISMODULE_ERR;
   }
+
+  // Command parsing.
+  long long gcs_mode = 0;
+  if (argc > 0) {
+    CHECK_EQ(REDISMODULE_OK, RedisModule_StringToLongLong(argv[0], &gcs_mode));
+  }
+  switch (gcs_mode) {
+  case 0:
+    module.SetGcsMode(RedisChainModule::GcsMode::kNormal);
+    break;
+  case 1:
+    module.SetGcsMode(RedisChainModule::GcsMode::kCkptOnly);
+    break;
+  case 2:
+    module.SetGcsMode(RedisChainModule::GcsMode::kCkptFlush);
+    break;
+  default:
+    return REDISMODULE_ERR;
+  }
+  LOG(INFO) << "GcsMode: " << module.GcsModeString();
+
+  // Register all commands.
+
   if (RedisModule_CreateCommand(ctx, "MEMBER.SET_ROLE",
                                 MemberSetRole_RedisCommand, "write", 1, 1,
                                 1) == REDISMODULE_ERR) {

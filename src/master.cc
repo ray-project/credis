@@ -135,6 +135,14 @@ int MasterAdd_RedisCommand(RedisModuleCtx* ctx,
       LOG(INFO) << "Replicating the tail.";
       redisReply* reply = reinterpret_cast<redisReply*>(
           redisCommand(found_tail.context, "MEMBER.REPLICATE"));
+#define CHECKR                                                          \
+  if (reply == NULL) {                                                  \
+    return RedisModule_ReplyWithError(ctx, found_tail.context->errstr); \
+  } else if (reply->type == REDIS_REPLY_ERROR) {                        \
+    return RedisModule_ReplyWithError(ctx, reply->str);                 \
+  }
+
+      CHECKR;
       freeReplyObject(reply);
 
       LOG(INFO) << "Setting new tail.";
@@ -145,6 +153,7 @@ int MasterAdd_RedisCommand(RedisModuleCtx* ctx,
       // Let writes flow through.
       reply = reinterpret_cast<redisReply*>(
           redisCommand(found_tail.context, "MEMBER.UNBLOCK_WRITES"));
+      CHECKR;
       freeReplyObject(reply);
 
     } else {

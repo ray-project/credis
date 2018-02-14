@@ -6,4 +6,4 @@
 	url = https://github.com/google/glog
 [submodule "leveldb"]
 	path = leveldb
-	url = git@github.com:google/leveldb.git
+	url = https://github.com/google/leveldb

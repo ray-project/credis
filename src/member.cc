@@ -252,9 +252,8 @@ int Put(RedisModuleCtx* ctx,
     //     RedisModule_Call(ctx, "SET", "ss", name, data);
     // CHECK(RedisModule_CallReplyType(reply) != REDISMODULE_REPLY_ERROR);
 
-    // const std::string k = ReadString(name);
     // NOTE(zongheng): this can be slow, see the note in class declaration.
-    // module.sn_to_key()[sn] = k;
+    module.sn_to_key()[sn] = ReadString(name);
     module.record_sn(static_cast<int64_t>(sn));
   }
 
@@ -275,13 +274,13 @@ int Put(RedisModuleCtx* ctx,
     RedisModule_Publish(client_id, s);
     RedisModule_FreeString(ctx, s);
 
-    //    if (false&&module.parent()) {
-    //      reply = RedisModule_Call(ctx, "MEMBER.ACK", "c",
-    //      sn_string.c_str()); if (RedisModule_CallReplyType(reply) ==
-    //      REDISMODULE_REPLY_ERROR) {
-    //        return RedisModule_ReplyWithCallReply(ctx, reply);
-    //      }
-    //    }
+    if (module.parent()) {
+      RedisModuleCallReply* reply =
+          RedisModule_Call(ctx, "MEMBER.ACK", "c", seqnum_str.c_str());
+      if (RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_ERROR) {
+        return RedisModule_ReplyWithCallReply(ctx, reply);
+      }
+    }
   } else {
     // NOTE: here we do redisAsyncCommand(child, ...).  However, if the child
     // crashed before the call, this function non-deterministically crashes
@@ -304,7 +303,7 @@ int Put(RedisModuleCtx* ctx,
           cid_len);
       // TODO(zongheng): check status.
       // LOG_EVERY_N(INFO, 999999999) << "Done";
-      // module.sent().insert(sn);
+      module.sent().insert(sn);
     } else {
       // TODO(zongheng): this case is incompletely handled, i.e. "failure of a
       // middle server".  To handle this the Sent list data structure needs to
@@ -452,8 +451,8 @@ int MemberPut_RedisCommand(RedisModuleCtx* ctx,
       RedisModule_ReplyWithLongLong(ctx, sn);
 
       // TODO(zongheng): which one is faster?
-      //const std::string sn_string = std::to_string(sn);
-      //RedisModule_ReplyWithStringBuffer(ctx, sn_string.data(),
+      // const std::string sn_string = std::to_string(sn);
+      // RedisModule_ReplyWithStringBuffer(ctx, sn_string.data(),
       //                                  sn_string.size());
 
       // LOG(INFO) << "MemberPut, assigning new sn " << sn;
@@ -577,7 +576,7 @@ int MemberAck_RedisCommand(RedisModuleCtx* ctx,
   std::string sn = ReadString(argv[1]);
   // LOG_EVERY_N(INFO, 999999999)
   //     << "Erasing sequence number " << sn << " from sent list";
-  // module.sent().erase(std::stoi(sn));
+  module.sent().erase(std::stoi(sn));
   if (module.parent()) {
     // LOG_EVERY_N(INFO, 999999999) << "Propagating the ACK up the chain";
     const int status = redisAsyncCommand(module.parent(), NULL, NULL,

@@ -1,12 +1,14 @@
 import time
+import uuid
 
 import pytest
 
 import redis
 from tests.common import startcredis
 
-
 # This script should be run from within the credis/ directory
+
+_CLIENT_ID = str(uuid.uuid4())  # Used as the channel name receiving acks.
 
 
 def test_ack():
@@ -16,11 +18,11 @@ def test_ack():
     # are blocking
     ack_client = redis.StrictRedis("127.0.0.1", 6371)
     p = ack_client.pubsub(ignore_subscribe_messages=True)
-    p.subscribe("answers")
+    p.subscribe(_CLIENT_ID)
     time.sleep(0.5)
     p.get_message()
     ssn = head_client.execute_command("MEMBER.PUT", "task_spec",
-                                      "some_random_value")
+                                      "some_random_value", _CLIENT_ID)
     time.sleep(0.5)
     put_ack = p.get_message()
 

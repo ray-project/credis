@@ -56,14 +56,11 @@ def AddNode(master_client, port=None):
         new_port = MAX_USED_PORT + 1
         MAX_USED_PORT += 1
     print('launching redis-server --port %d' % new_port)
-    member = subprocess.Popen(
-        [
-            "redis/src/redis-server",
-            "--loadmodule",
-            "build/src/libmember.so",
-            "--port",
-            str(new_port)
-        ],)
+    member = subprocess.Popen([
+        "redis/src/redis-server", "--loadmodule", "build/src/libmember.so",
+        "--port",
+        str(new_port)
+    ], )
     time.sleep(0.1)
     print('calling master add, new_port %s' % new_port)
     master_client.execute_command("MASTER.ADD", "127.0.0.1", str(new_port))
@@ -105,11 +102,11 @@ def AckClient():
     return redis.StrictRedis("127.0.0.1", PORTS[-1])
 
 
-def AckClientAndPubsub(client=None):
+def AckClientAndPubsub(client_id, client=None):
     if client is None:
         client = AckClient()
     ack_pubsub = client.pubsub(ignore_subscribe_messages=True)
-    ack_pubsub.subscribe("answers")
+    ack_pubsub.subscribe(client_id)
     return client, ack_pubsub
 
 
@@ -132,10 +129,10 @@ def RefreshHeadFromMaster(master_client):
     return redis.StrictRedis(splits[0], int(splits[1]))
 
 
-def RefreshTailFromMaster(master_client):
+def RefreshTailFromMaster(master_client, client_id):
     print('calling MASTER.REFRESH_TAIL')
     tail_addr_port = master_client.execute_command("MASTER.REFRESH_TAIL")
     print('tail_addr_port: %s' % tail_addr_port)
     splits = tail_addr_port.split(b':')
     c = redis.StrictRedis(splits[0], int(splits[1]))
-    return AckClientAndPubsub(c)
+    return AckClientAndPubsub(client_id, c)

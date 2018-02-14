@@ -4,6 +4,7 @@ include_directories(${CMAKE_SOURCE_DIR}/redis/deps/)
 
 find_package(glog 0.3.5 REQUIRED)
 find_package(LevelDB REQUIRED)
+find_package(Tcmalloc)
 include_directories(${LevelDB_INCLUDES})
 
 if(APPLE)
@@ -45,7 +46,6 @@ target_link_libraries(master ${REDIS_MODULE_LDFLAGS})
 target_link_libraries(master utils)
 target_link_libraries(master glog::glog)
 target_link_libraries(master ${LevelDB_LIBRARIES})
-# target_link_libraries(master profiler)
 
 # member
 add_library(member SHARED member.cc)
@@ -55,30 +55,29 @@ target_link_libraries(member utils)
 target_link_libraries(member glog::glog)
 target_link_libraries(member ${LevelDB_LIBRARIES})
 target_link_libraries(member master_client)
-target_link_libraries(member profiler)
-target_link_libraries(member tcmalloc)
+target_link_libraries(member ${Tcmalloc_LIBRARY})
 
 # Benchmarks.
 add_executable(credis_parput_bench credis_parput_bench.cc)
 target_link_libraries(credis_parput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
-  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o tcmalloc timer)
+  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o ${Tcmalloc_LIBRARY} timer)
 
 add_executable(credis_seqput_bench credis_seqput_bench.cc)
 target_link_libraries(credis_seqput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
-  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o tcmalloc timer)
+  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o ${Tcmalloc_LIBRARY} timer)
 
 add_executable(redis_parput_bench redis_parput_bench.cc)
 target_link_libraries(redis_parput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
-  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o tcmalloc timer)
+  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o ${Tcmalloc_LIBRARY} timer)
 
 add_executable(redis_seqput_bench redis_seqput_bench.cc)
 target_link_libraries(redis_seqput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
-  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o tcmalloc timer)
+  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o ${Tcmalloc_LIBRARY} timer)

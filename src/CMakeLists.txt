@@ -68,22 +68,30 @@ add_executable(credis_parput_bench credis_parput_bench.cc)
 target_link_libraries(credis_parput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
-  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o ${MALLOC_LIBRARY} timer)
+  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o
+  ${CMAKE_SOURCE_DIR}/redis/deps/jemalloc/lib/libjemalloc.a
+  ${MALLOC_LIBRARY} timer)
 
 add_executable(credis_seqput_bench credis_seqput_bench.cc)
 target_link_libraries(credis_seqput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
-  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o ${MALLOC_LIBRARY} timer)
+  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o
+  ${CMAKE_SOURCE_DIR}/redis/deps/jemalloc/lib/libjemalloc.a
+  ${MALLOC_LIBRARY} timer)
 
 add_executable(redis_parput_bench redis_parput_bench.cc)
 target_link_libraries(redis_parput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
-  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o ${MALLOC_LIBRARY} timer)
+  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o
+  ${CMAKE_SOURCE_DIR}/redis/deps/jemalloc/lib/libjemalloc.a
+  ${MALLOC_LIBRARY} timer)
 
 add_executable(redis_seqput_bench redis_seqput_bench.cc)
 target_link_libraries(redis_seqput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
-  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o ${MALLOC_LIBRARY} timer)
+  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o
+  ${CMAKE_SOURCE_DIR}/redis/deps/jemalloc/lib/libjemalloc.a
+  ${MALLOC_LIBRARY} timer)

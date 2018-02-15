@@ -7,6 +7,12 @@ find_package(LevelDB REQUIRED)
 find_package(Tcmalloc)
 include_directories(${LevelDB_INCLUDES})
 
+if (Tcmalloc_FOUND)
+  set(MALLOC_LIBRARY "${Tcmalloc_LIBRARY}")
+else()
+  set(MALLOC_LIBRARY)
+endif()
+
 if(APPLE)
   # set(REDIS_MODULE_CFLAGS -W -Wall -dynamic -fno-common -g -ggdb -std=c++11 -O2)
   set(REDIS_MODULE_CFLAGS -std=c++11 -g -pg)
@@ -55,29 +61,29 @@ target_link_libraries(member utils)
 target_link_libraries(member glog::glog)
 target_link_libraries(member ${LevelDB_LIBRARIES})
 target_link_libraries(member master_client)
-target_link_libraries(member ${Tcmalloc_LIBRARY})
+target_link_libraries(member ${MALLOC_LIBRARY})
 
 # Benchmarks.
 add_executable(credis_parput_bench credis_parput_bench.cc)
 target_link_libraries(credis_parput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
-  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o ${Tcmalloc_LIBRARY} timer)
+  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o ${MALLOC_LIBRARY} timer)
 
 add_executable(credis_seqput_bench credis_seqput_bench.cc)
 target_link_libraries(credis_seqput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
-  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o ${Tcmalloc_LIBRARY} timer)
+  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o ${MALLOC_LIBRARY} timer)
 
 add_executable(redis_parput_bench redis_parput_bench.cc)
 target_link_libraries(redis_parput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
-  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o ${Tcmalloc_LIBRARY} timer)
+  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o ${MALLOC_LIBRARY} timer)
 
 add_executable(redis_seqput_bench redis_seqput_bench.cc)
 target_link_libraries(redis_seqput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
-  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o ${Tcmalloc_LIBRARY} timer)
+  ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o ${MALLOC_LIBRARY} timer)

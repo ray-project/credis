@@ -7,10 +7,14 @@ find_package(LevelDB REQUIRED)
 find_package(Tcmalloc)
 include_directories(${LevelDB_INCLUDES})
 
+# For redis, build with either of
+#   make MALLOC=tcmalloc
+# or
+#   make MALLOC=jemalloc
 if (Tcmalloc_FOUND)
   set(MALLOC_LIBRARY "${Tcmalloc_LIBRARY}")
 else()
-  set(MALLOC_LIBRARY)
+  set(MALLOC_LIBRARY "${CMAKE_SOURCE_DIR}/redis/deps/jemalloc/lib/libjemalloc.a")
 endif()
 
 if(APPLE)
@@ -69,7 +73,6 @@ target_link_libraries(credis_parput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
   ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o
-  ${CMAKE_SOURCE_DIR}/redis/deps/jemalloc/lib/libjemalloc.a
   ${MALLOC_LIBRARY} timer)
 
 add_executable(credis_seqput_bench credis_seqput_bench.cc)
@@ -77,7 +80,6 @@ target_link_libraries(credis_seqput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
   ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o
-  ${CMAKE_SOURCE_DIR}/redis/deps/jemalloc/lib/libjemalloc.a
   ${MALLOC_LIBRARY} timer)
 
 add_executable(redis_parput_bench redis_parput_bench.cc)
@@ -85,7 +87,6 @@ target_link_libraries(redis_parput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
   ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o
-  ${CMAKE_SOURCE_DIR}/redis/deps/jemalloc/lib/libjemalloc.a
   ${MALLOC_LIBRARY} timer)
 
 add_executable(redis_seqput_bench redis_seqput_bench.cc)
@@ -93,5 +94,4 @@ target_link_libraries(redis_seqput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
   ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o
-  ${CMAKE_SOURCE_DIR}/redis/deps/jemalloc/lib/libjemalloc.a
   ${MALLOC_LIBRARY} timer)

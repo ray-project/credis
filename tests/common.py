@@ -32,7 +32,7 @@ def KillAll():
     subprocess.Popen(["pkill", "-9", "redis-server.*"]).wait()
 
 
-def KillNode(index=None, port=None):
+def KillNode(index=None, port=None, stateless=False):
     global PORTS
     assert index is not None or port is not None
     if port is None:
@@ -48,10 +48,11 @@ def KillNode(index=None, port=None):
     print('killing port %d' % port_to_kill)
     subprocess.check_output(
         ["pkill", "-9", "redis-server.*:%s" % port_to_kill])
-    if port is None:
-        del PORTS[index + 1]
-    else:
-        del PORTS[PORTS.index(port)]
+    if not stateless:
+        if port is None:
+            del PORTS[index + 1]
+        else:
+            del PORTS[PORTS.index(port)]
 
 
 def AddNode(master_client, port=None, gcs_mode=GCS_NORMAL):

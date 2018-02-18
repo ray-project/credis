@@ -325,7 +325,11 @@ int DoFlush(RedisModuleCtx* ctx,
     }
     // TODO(zongheng): check status.
   }
-  return RedisModule_ReplyWithSimpleString(ctx, "OK");
+  if (!flushable_keys.empty()) {
+    return RedisModule_ReplyWithLongLong(ctx, 1);
+  } else {
+    return RedisModule_ReplyWithLongLong(ctx, 0);
+  }
 }
 
 // Helper function to handle updates locally.
@@ -801,13 +805,13 @@ int TailCheckpoint_RedisCommand(RedisModuleCtx* ctx,
 
 // HEAD.FLUSH: incrementally flush checkpointed entries out of memory.
 //
+// Replies to the client # of keys removed from redis state.
+//
 // Errors out if not called on the head, or if GcsMode is not kCkptFlush.
-// Args:
-//   argv[1]: client id
 int HeadFlush_RedisCommand(RedisModuleCtx* ctx,
                            RedisModuleString** argv,
                            int argc) {
-  if (argc != 2) return RedisModule_WrongArity(ctx);
+  if (argc != 1) return RedisModule_WrongArity(ctx);  // No args needed.
   if (!module.ActAsHead()) {
     return RedisModule_ReplyWithError(
         ctx, "ERR this command must be called on the head.");

@@ -40,7 +40,7 @@ class GcsModeTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         for p in common.INIT_PORTS:
-            common.KillNode(port=p)
+            common.KillNode(port=p, stateless=True)
 
     def testNormal(self):
         common.Start()
@@ -50,7 +50,7 @@ class GcsModeTests(unittest.TestCase):
         self.assertTrue('GcsMode is set to kNormal' in str(ctx.exception))
 
         with self.assertRaises(redis.exceptions.ResponseError) as ctx:
-            self.head_client.execute_command('HEAD.FLUSH', _CLIENT_ID)
+            self.head_client.execute_command('HEAD.FLUSH')
         self.assertTrue(
             'GcsMode is NOT set to kCkptFlush' in str(ctx.exception))
 
@@ -59,14 +59,68 @@ class GcsModeTests(unittest.TestCase):
         self.ack_client.execute_command('TAIL.CHECKPOINT')
 
         with self.assertRaises(redis.exceptions.ResponseError) as ctx:
-            self.head_client.execute_command('HEAD.FLUSH', _CLIENT_ID)
+            self.head_client.execute_command('HEAD.FLUSH')
         self.assertTrue(
             'GcsMode is NOT set to kCkptFlush' in str(ctx.exception))
 
     def testCkptFlush(self):
         common.Start(gcs_mode=common.GCS_CKPTFLUSH)
         self.ack_client.execute_command('TAIL.CHECKPOINT')
-        self.head_client.execute_command('HEAD.FLUSH', _CLIENT_ID)
+        self.head_client.execute_command('HEAD.FLUSH')
+
+
+class CheckpointFlush(unittest.TestCase):
+    def setUp(self):
+        self.ack_client = common.AckClient()
+        self.master_client = common.MasterClient()
+        self.head_client = common.GetHeadFromMaster(self.master_client)
+
+    @classmethod
+    def tearDownClass(cls):
+        for p in common.INIT_PORTS:
+            common.KillNode(port=p, stateless=True)
+
+    def testCannotFlush(self):
+        common.Start(gcs_mode=common.GCS_CKPTFLUSH)
+        r = self.head_client.execute_command('HEAD.FLUSH')
+        self.assertEqual(b"Nothing to flush", r)
+
+    def testBasics(self):
+        common.Start(gcs_mode=common.GCS_CKPTFLUSH)
+
+        self.head_client.execute_command('MEMBER.PUT', 'k1', 'v1', _CLIENT_ID)
+
+        self.assertEqual(b'v1', self.ack_client.execute_command('READ', 'k1'))
+
+        # 1 entry checkpointed.
+        self.assertEqual(1, self.ack_client.execute_command('TAIL.CHECKPOINT'))
+
+        # 0 entry checkpointed.
+        self.assertEqual(0, self.ack_client.execute_command('TAIL.CHECKPOINT'))
+
+        self.head_client.execute_command('MEMBER.PUT', 'k1', 'v2', _CLIENT_ID)
+        self.assertEqual(1, self.ack_client.execute_command('TAIL.CHECKPOINT'))
+
+        self.head_client.execute_command('MEMBER.PUT', 'k1', 'v3', _CLIENT_ID)
+
+        # Process k1 (first seqnum).  Physically, 0 key has been flushed out of
+        # _redis_ memory state, because k1 has 2 dirty writes.
+        self.assertEqual(0, self.head_client.execute_command('HEAD.FLUSH'))
+
+        # Process k1 (second seqnum).
+        self.assertEqual(0, self.head_client.execute_command('HEAD.FLUSH'))
+        # It remains in memory because of a dirty write (k1, v3).
+        self.assertEqual(b'v3', self.ack_client.execute_command('GET k1'))
+
+        # Now all seqnums checkpointed.
+        self.assertEqual(1, self.ack_client.execute_command('TAIL.CHECKPOINT'))
+        # Process k1 (3rd seqnum).  1 means it's physically flushed.
+        self.assertEqual(1, self.head_client.execute_command('HEAD.FLUSH'))
+
+        # Check that redis's native GET returns nothing.
+        self.assertIsNone(self.ack_client.execute_command('GET k1'))
+        # READ is credis' read mechanism, can read checkpoints.
+        self.assertEqual(b'v3', self.ack_client.execute_command('READ k1'))
 
 
 if __name__ == "__main__":

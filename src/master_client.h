@@ -37,10 +37,15 @@ class MasterClient {
   //
   // The master manages and acts as the source-of-truth for watermarks.
   //
+  // Definitions:
+  //   sn_ckpt: next/smallest sn yet to be checkpointed;
+  //            thus, [0, sn_ckpt) is the currently checkpointed range.
+  //   sn_flushed: next/smallest sn yet to be flushed;
+  //            thus, [0, sn_flushed) is the currently flushed range.
+  //
   // Properties of various watermarks (and their extreme cases):
   //   sn_ckpt <= sn_latest_tail + 1 (i.e., everything has been checkpointed)
-  //   sn_flushed < sn_ckpt (i.e., all checkpointed data has been flushed)
-
+  //   sn_flushed <= sn_ckpt (i.e., all checkpointed data has been flushed)
   Status GetWatermark(Watermark w, int64_t* val) const;
   Status SetWatermark(Watermark w, int64_t new_val);
 

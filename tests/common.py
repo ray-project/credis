@@ -13,6 +13,11 @@ INIT_PORTS = [6369, 6370, 6371]
 PORTS = list(INIT_PORTS)
 MAX_USED_PORT = max(PORTS)  # For picking the next port.
 
+# GCS modes.
+GCS_NORMAL = 0
+GCS_CKPTONLY = 1
+GCS_CKPTFLUSH = 2
+
 
 def MakeChain(num_nodes=2):
     global PORTS
@@ -23,7 +28,11 @@ def MakeChain(num_nodes=2):
     return chain
 
 
-def KillNode(index=None, port=None):
+def KillAll():
+    subprocess.Popen(["pkill", "-9", "redis-server.*"]).wait()
+
+
+def KillNode(index=None, port=None, stateless=False):
     global PORTS
     assert index is not None or port is not None
     if port is None:
@@ -39,13 +48,14 @@ def KillNode(index=None, port=None):
     print('killing port %d' % port_to_kill)
     subprocess.check_output(
         ["pkill", "-9", "redis-server.*:%s" % port_to_kill])
-    if port is None:
-        del PORTS[index + 1]
-    else:
-        del PORTS[PORTS.index(port)]
+    if not stateless:
+        if port is None:
+            del PORTS[index + 1]
+        else:
+            del PORTS[PORTS.index(port)]
 
 
-def AddNode(master_client, port=None):
+def AddNode(master_client, port=None, gcs_mode=GCS_NORMAL):
     global PORTS
     global MAX_USED_PORT
     if port is not None:
@@ -56,42 +66,57 @@ def AddNode(master_client, port=None):
         new_port = MAX_USED_PORT + 1
         MAX_USED_PORT += 1
     print('launching redis-server --port %d' % new_port)
-    member = subprocess.Popen(
-        [
-            "redis/src/redis-server",
-            "--loadmodule",
-            "build/src/libmember.so",
-            "--port",
-            str(new_port)
-        ],)
+
+    with open("%d.log" % new_port, 'w') as output:
+        member = subprocess.Popen(
+            [
+                "redis/src/redis-server",
+                "--loadmodule",
+                "build/src/libmember.so",
+                str(gcs_mode),
+                "--port",
+                str(new_port),
+            ],
+            stdout=output,
+            stderr=output)
     time.sleep(0.1)
-    print('calling master add, new_port %s' % new_port)
     master_client.execute_command("MASTER.ADD", "127.0.0.1", str(new_port))
+    member_client = redis.StrictRedis("127.0.0.1", new_port)
+    master_port = master_client.connection_pool.connection_kwargs['port']
+    member_client.execute_command("MEMBER.CONNECT_TO_MASTER", "127.0.0.1",
+                                  master_port)
     if port is None:
         PORTS.append(new_port)
     return member, new_port
 
 
-def Start(request=None, chain=INIT_PORTS):
+def Start(request=None, chain=INIT_PORTS, gcs_mode=GCS_NORMAL):
     global PORTS
     global MAX_USED_PORT
     PORTS = list(chain)
     MAX_USED_PORT = max(PORTS)  # For picking the next port.
     assert len(PORTS) > 1, "At least 1 master and 1 chain node"
-    print('Setting up initial chain: %s' % INIT_PORTS)
+    print('Setting up initial chain (mode %d): %s' % (gcs_mode, INIT_PORTS))
 
-    subprocess.Popen(["pkill", "-9", "redis-server.*"]).wait()
-    master = subprocess.Popen([
-        "redis/src/redis-server", "--loadmodule", "build/src/libmaster.so",
-        "--port",
-        str(PORTS[0])
-    ])
+    KillAll()
+    with open("%d.log" % PORTS[0], 'w') as output:
+        master = subprocess.Popen(
+            [
+                "redis/src/redis-server",
+                "--loadmodule",
+                "build/src/libmaster.so",
+                str(gcs_mode),
+                "--port",
+                str(PORTS[0]),
+            ],
+            stdout=output,
+            stderr=output)
     if request is not None:
         request.addfinalizer(master.kill)
     master_client = redis.StrictRedis("127.0.0.1", PORTS[0])
 
     for port in PORTS[1:]:
-        member, _ = AddNode(master_client, port)
+        member, _ = AddNode(master_client, port, gcs_mode)
         if request is not None:
             request.addfinalizer(member.kill)
 
@@ -105,11 +130,11 @@ def AckClient():
     return redis.StrictRedis("127.0.0.1", PORTS[-1])
 
 
-def AckClientAndPubsub(client=None):
+def AckClientAndPubsub(client_id, client=None):
     if client is None:
         client = AckClient()
     ack_pubsub = client.pubsub(ignore_subscribe_messages=True)
-    ack_pubsub.subscribe("answers")
+    ack_pubsub.subscribe(client_id)
     return client, ack_pubsub
 
 
@@ -132,10 +157,10 @@ def RefreshHeadFromMaster(master_client):
     return redis.StrictRedis(splits[0], int(splits[1]))
 
 
-def RefreshTailFromMaster(master_client):
+def RefreshTailFromMaster(master_client, client_id):
     print('calling MASTER.REFRESH_TAIL')
     tail_addr_port = master_client.execute_command("MASTER.REFRESH_TAIL")
     print('tail_addr_port: %s' % tail_addr_port)
     splits = tail_addr_port.split(b':')
     c = redis.StrictRedis(splits[0], int(splits[1]))
-    return AckClientAndPubsub(c)
+    return AckClientAndPubsub(client_id, c)

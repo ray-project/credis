@@ -1,5 +1,14 @@
+"""Usage:
+
+# For testing.
+$ python -m pytest tests/demo.py
+
+# Python-side benchmarks are launched as a standalone script.
+$ python tests/demo.py
+"""
 import multiprocessing
 import time
+import uuid
 
 import numpy as np
 
@@ -16,6 +25,7 @@ act_pubsub = None
 fails_since_last_success = 0
 max_fails = 3
 ops_completed = multiprocessing.Value('i', 0)
+_CLIENT_ID = str(uuid.uuid4())  # Used as the channel name receiving acks.
 
 
 # From redis-py/.../test_pubsub.py.
@@ -40,9 +50,11 @@ def Put(i):
     i_str = str(i)  # Serialize it once.
     put_issued = False
 
-    for k in range(3):  # Try 3 times.
+    # Try to issue the put.
+    for k in range(3):
         try:
-            sn = head_client.execute_command("MEMBER.PUT", i_str, i_str)
+            sn = head_client.execute_command("MEMBER.PUT", i_str, i_str,
+                                             _CLIENT_ID)
             put_issued = True
             break
         except redis.exceptions.ConnectionError:
@@ -54,7 +66,7 @@ def Put(i):
 
     # Wait for the ack.
     ack = None
-    good_client = False
+    ack_client_okay = False
     for k in range(3):  # Try 3 times.
         try:
             # if k > 0:
@@ -64,13 +76,14 @@ def Put(i):
             # then receives an ACK for the old sn (an issue clients will need
             # to address).  Using 10ms for now.
             ack = wait_for_message(ack_pubsub, timeout=1e-2)
-            good_client = True
+            ack_client_okay = True
             break
         except redis.exceptions.ConnectionError as e:
-            _, ack_pubsub = RefreshTailFromMaster(master_client)  # Blocking.
+            _, ack_pubsub = RefreshTailFromMaster(master_client,
+                                                  _CLIENT_ID)  # Blocking.
             continue
 
-    if not good_client:
+    if not ack_client_okay:
         raise Exception("Irrecoverable redis connection issue; ack client %s" %
                         ack_pubsub.connection)
     elif ack is None:
@@ -82,7 +95,7 @@ def Put(i):
                 "A maximum of %d update attempts have failed; "
                 "no acks from the store are received. i = %d, client = %s" %
                 (max_fails, i, ack_pubsub.connection))
-        _, ack_pubsub = RefreshTailFromMaster(master_client)
+        _, ack_pubsub = RefreshTailFromMaster(master_client, _CLIENT_ID)
         print("%d updates have been ignored since last success, "
               "retrying Put(%d) with fresh ack client %s" %
               (fails_since_last_success, i, ack_pubsub.connection))
@@ -100,7 +113,8 @@ def SeqPut(n, sleep_secs):
     global ack_client
     global ack_pubsub
     global ops_completed
-    ack_client, ack_pubsub = AckClientAndPubsub()
+    ack_client, ack_pubsub = AckClientAndPubsub(
+        client_id=_CLIENT_ID, client=None)
     ops_completed.value = 0
 
     latencies = []
@@ -122,8 +136,10 @@ def SeqPut(n, sleep_secs):
 
 # Asserts that the redis state is exactly {i -> i | i in [0, n)}.
 def Check(n):
-    read_client, _ = RefreshTailFromMaster(master_client)
+    read_client, _ = RefreshTailFromMaster(master_client, _CLIENT_ID)
     actual = len(read_client.keys(b'*'))
+    if actual != n:
+        print('head # keys: %d' % len(head_client.keys(b'*')))
     assert actual == n, "Written %d Expected %d" % (actual, n)
     for i in range(n):
         data = read_client.get(str(i))
@@ -153,6 +169,7 @@ def test_demo():
     for proc, _ in new_nodes:
         proc.kill()
     print('Total ops %d, completed ops %d' % (n, ops_completed.value))
+
 
 
 def test_kaa():

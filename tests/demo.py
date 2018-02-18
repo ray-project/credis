@@ -23,7 +23,7 @@ act_pubsub = None
 
 # Put() ops can be ignored when failures occur on the servers.  Try a few times.
 fails_since_last_success = 0
-max_fails = 10
+max_fails = 3
 ops_completed = multiprocessing.Value('i', 0)
 _CLIENT_ID = str(uuid.uuid4())  # Used as the channel name receiving acks.
 
@@ -156,31 +156,20 @@ def test_demo():
     # Kill / add.
     new_nodes = []
     time.sleep(0.1)
-    # common.KillNode(index=1)
+    common.KillNode(index=1)
     new_nodes.append(common.AddNode(master_client))
     driver.join()
 
     assert ops_completed.value == n
     chain = master_client.execute_command('MASTER.GET_CHAIN')
     chain = [s.split(b':')[-1] for s in chain]
-    # assert chain == [b'6370', b'6372'], 'chain %s' % chain
+    assert chain == [b'6370', b'6372'], 'chain %s' % chain
     Check(ops_completed.value)
 
     for proc, _ in new_nodes:
         proc.kill()
     print('Total ops %d, completed ops %d' % (n, ops_completed.value))
 
-
-def test_gcs_mode_normal():
-    # By default, the execution mode is kNormal, which disallows flush/ckpt.
-    try:
-        ack_client.execute_command('TAIL.CHECKPOINT')
-    except redis.exceptions.ResponseError as e:
-        assert ('GcsMode is set to kNormal' in str(e))
-    try:
-        head_client.execute_command('HEAD.FLUSH', _CLIENT_ID)
-    except redis.exceptions.ResponseError as e:
-        assert ('GcsMode is NOT set to kCkptFlush' in str(e))
 
 
 def test_kaa():

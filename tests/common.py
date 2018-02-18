@@ -28,6 +28,10 @@ def MakeChain(num_nodes=2):
     return chain
 
 
+def KillAll():
+    subprocess.Popen(["pkill", "-9", "redis-server.*"]).wait()
+
+
 def KillNode(index=None, port=None):
     global PORTS
     assert index is not None or port is not None
@@ -75,8 +79,11 @@ def AddNode(master_client, port=None, gcs_mode=GCS_NORMAL):
             stdout=output,
             stderr=output)
     time.sleep(0.1)
-    print('calling master add, new_port %s' % new_port)
     master_client.execute_command("MASTER.ADD", "127.0.0.1", str(new_port))
+    member_client = redis.StrictRedis("127.0.0.1", new_port)
+    master_port = master_client.connection_pool.connection_kwargs['port']
+    member_client.execute_command("MEMBER.CONNECT_TO_MASTER", "127.0.0.1",
+                                  master_port)
     if port is None:
         PORTS.append(new_port)
     return member, new_port
@@ -88,9 +95,9 @@ def Start(request=None, chain=INIT_PORTS, gcs_mode=GCS_NORMAL):
     PORTS = list(chain)
     MAX_USED_PORT = max(PORTS)  # For picking the next port.
     assert len(PORTS) > 1, "At least 1 master and 1 chain node"
-    print('Setting up initial chain: %s' % INIT_PORTS)
+    print('Setting up initial chain (mode %d): %s' % (gcs_mode, INIT_PORTS))
 
-    subprocess.Popen(["pkill", "-9", "redis-server.*"]).wait()
+    KillAll()
     with open("%d.log" % PORTS[0], 'w') as output:
         master = subprocess.Popen(
             [
@@ -108,7 +115,7 @@ def Start(request=None, chain=INIT_PORTS, gcs_mode=GCS_NORMAL):
     master_client = redis.StrictRedis("127.0.0.1", PORTS[0])
 
     for port in PORTS[1:]:
-        member, _ = AddNode(master_client, port)
+        member, _ = AddNode(master_client, port, gcs_mode)
         if request is not None:
             request.addfinalizer(member.kill)
 

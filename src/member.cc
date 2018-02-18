@@ -685,8 +685,10 @@ int TailCheckpoint_RedisCommand(RedisModuleCtx* ctx,
   // but any smaller chunk is valid (and perhaps desirable, when we want to keep
   // this redis command running < 1ms, say.)
   int64_t sn_ckpt = 0;
+  DLOG(INFO) << "getting watermark";
   Status s =
       module.Master().GetWatermark(MasterClient::Watermark::kSnCkpt, &sn_ckpt);
+  DLOG(INFO) << "done getting watermark " << s.ToString();
   HandleNonOk(ctx, s);
   const int64_t sn_latest = module.sn();
 

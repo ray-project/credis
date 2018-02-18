@@ -121,9 +121,9 @@ def Start(request=None, chain=INIT_PORTS, gcs_mode=GCS_NORMAL):
             request.addfinalizer(member.kill)
 
 
-@pytest.fixture(scope='function', autouse=True, params=[GCS_NORMAL])
+@pytest.fixture(autouse=True)
 def startcredis(request):
-    Start(request, gcs_mode=request.param)
+    Start(request)
 
 
 def AckClient():

@@ -30,6 +30,21 @@ using Status = leveldb::Status;  // So that it can be easily replaced.
 // TODO(zongheng): all callers of SetRole() in this module need to check the
 // return status.
 
+namespace {
+
+// Handle failure for redis module command as caller, hiredis context as callee.
+int ReplyIfFailure(RedisModuleCtx* rm_ctx,
+                   redisContext* ctx,
+                   redisReply* reply) {
+  if (reply == NULL) {
+    return RedisModule_ReplyWithError(rm_ctx, ctx->errstr);
+  } else if (reply->type == REDIS_REPLY_ERROR) {
+    return RedisModule_ReplyWithError(rm_ctx, reply->str);
+  }
+}
+
+}  // anonymous namespace
+
 Status SetRole(redisContext* context,
                const std::string& role,
                const std::string& prev_address,
@@ -130,19 +145,11 @@ int MasterAdd_RedisCommand(RedisModuleCtx* ctx,
     }
 
     if (size > 0) {
-      // TODO(zongheng): below, "reply" needs to be checked.
       // TODO(pcm): Execute Sent_T requests
       LOG(INFO) << "Replicating the tail.";
       redisReply* reply = reinterpret_cast<redisReply*>(
           redisCommand(found_tail.context, "MEMBER.REPLICATE"));
-#define CHECKR                                                          \
-  if (reply == NULL) {                                                  \
-    return RedisModule_ReplyWithError(ctx, found_tail.context->errstr); \
-  } else if (reply->type == REDIS_REPLY_ERROR) {                        \
-    return RedisModule_ReplyWithError(ctx, reply->str);                 \
-  }
-
-      CHECKR;
+      ReplyIfFailure(ctx, found_tail.context, reply);
       freeReplyObject(reply);
 
       LOG(INFO) << "Setting new tail.";
@@ -153,7 +160,7 @@ int MasterAdd_RedisCommand(RedisModuleCtx* ctx,
       // Let writes flow through.
       reply = reinterpret_cast<redisReply*>(
           redisCommand(found_tail.context, "MEMBER.UNBLOCK_WRITES"));
-      CHECKR;
+      ReplyIfFailure(ctx, found_tail.context, reply);
       freeReplyObject(reply);
 
     } else {

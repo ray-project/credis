@@ -982,6 +982,8 @@ extern "C" {
 int RedisModule_OnLoad(RedisModuleCtx* ctx,
                        RedisModuleString** argv,
                        int argc) {
+  ::google::InitGoogleLogging("libmember");
+
   // Init.  Must be at the top.
   if (RedisModule_Init(ctx, "MEMBER", 1, REDISMODULE_APIVER_1) ==
       REDISMODULE_ERR) {

@@ -347,6 +347,8 @@ extern "C" {
 int RedisModule_OnLoad(RedisModuleCtx* ctx,
                        RedisModuleString** argv,
                        int argc) {
+  ::google::InitGoogleLogging("libmaster");
+
   REDISMODULE_NOT_USED(argc);
   REDISMODULE_NOT_USED(argv);
 

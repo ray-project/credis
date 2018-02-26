@@ -62,7 +62,7 @@ target_link_libraries(member utils)
 target_link_libraries(member glog::glog)
 target_link_libraries(member ${LevelDB_LIBRARIES})
 target_link_libraries(member master_client)
-target_link_libraries(member ${MALLOC_LIBRARY})
+target_link_libraries(member ${MALLOC_LIBRARY} timer)
 
 # Benchmarks.
 add_executable(credis_parput_bench credis_parput_bench.cc)

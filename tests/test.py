@@ -83,7 +83,7 @@ class CheckpointFlush(unittest.TestCase):
     def testCannotFlush(self):
         common.Start(gcs_mode=common.GCS_CKPTFLUSH)
         r = self.head_client.execute_command('HEAD.FLUSH')
-        self.assertEqual(b"Nothing to flush", r)
+        self.assertEqual(0, r)
 
     def testBasics(self):
         common.Start(gcs_mode=common.GCS_CKPTFLUSH)

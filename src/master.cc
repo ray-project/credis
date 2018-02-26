@@ -347,6 +347,7 @@ extern "C" {
 int RedisModule_OnLoad(RedisModuleCtx* ctx,
                        RedisModuleString** argv,
                        int argc) {
+  FLAGS_logtostderr = 1;  // By default glog uses log files in /tmp.
   ::google::InitGoogleLogging("libmaster");
 
   REDISMODULE_NOT_USED(argc);

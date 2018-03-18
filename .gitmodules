@@ -7,3 +7,9 @@
 [submodule "leveldb"]
 	path = leveldb
 	url = https://github.com/google/leveldb
+[submodule "grpc"]
+	path = grpc
+	url = https://github.com/grpc/grpc
+[submodule "etcd3-cpp"]
+	path = etcd3
+	url = https://github.com/graysonchao/etcd3-cpp

@@ -34,8 +34,13 @@
 __pycache__
 .DS_Store
 .cache
+*.pyc
 
 # Development-related temp files
 *.log
 callgrind.out.*
 *.sw*
+cmake-build-debug/
+build/
+.pytest_cache/
+.idea*

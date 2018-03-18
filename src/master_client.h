@@ -25,7 +25,7 @@ class MasterClient {
     kSnFlushed = 1,
   };
 
-  virtual Status Connect(const std::string& address, int port) = 0;
+  virtual Status Connect(const std::string& url) = 0;
 
   // TODO(zongheng): impl.
   // Retries the current head and tail nodes (for writes and reads,
@@ -50,22 +50,9 @@ class MasterClient {
   virtual Status SetWatermark(Watermark w, int64_t new_val) = 0;
 
  protected:
-  const char* WatermarkKey(Watermark w) const;
+  virtual const char* WatermarkKey(Watermark w) const = 0;
 
   static constexpr int64_t kSnCkptInit = 0;
   static constexpr int64_t kSnFlushedInit = 0;
 };
-
-class RedisMasterClient : public MasterClient {
- public:
-  Status Connect(const std::string& address, int port) override;
-  Status Head(std::string* address, int* port) override;
-  Status Tail(std::string* address, int* port) override;
-  Status GetWatermark(Watermark w, int64_t* val) const override;
-  Status SetWatermark(Watermark w, int64_t new_val) override;
-
- private:
-  std::unique_ptr<redisContext> redis_context_;
-};
-
 #endif  // CREDIS_MASTER_CLIENT_H_

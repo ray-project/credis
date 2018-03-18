@@ -70,7 +70,7 @@ def Put(i):
     for k in range(3):  # Try 3 times.
         try:
             # if k > 0:
-            # print('k %d pubsub %s' % (k, ack_pubsub.connection))
+            # common.log('k %d pubsub %s' % (k, ack_pubsub.connection))
             # NOTE(zongheng): 1e-4 seems insufficient for an ACK to be
             # delivered back.  1e-3 has the issue of triggering a retry, but
             # then receives an ACK for the old sn (an issue clients will need
@@ -96,10 +96,10 @@ def Put(i):
                 "no acks from the store are received. i = %d, client = %s" %
                 (max_fails, i, ack_pubsub.connection))
         _, ack_pubsub = RefreshTailFromMaster(master_client, _CLIENT_ID)
-        print("%d updates have been ignored since last success, "
-              "retrying Put(%d) with fresh ack client %s" %
-              (fails_since_last_success, i, ack_pubsub.connection))
-        time.sleep(1)
+        common.log("%d updates have been ignored since last success, "
+                   "retrying Put(%d) with fresh ack client %s" %
+                   (fails_since_last_success, i, ack_pubsub.connection))
+        time.sleep(3)
         Put(i)
     else:
         # TODO(zongheng): this is a stringent check.  See NOTE above: sometimes
@@ -110,6 +110,7 @@ def Put(i):
 
 def SeqPut(n, sleep_secs):
     """For i in range(n), sequentially put i->i into redis."""
+    global master_client
     global ack_client
     global ack_pubsub
     global ops_completed
@@ -120,7 +121,7 @@ def SeqPut(n, sleep_secs):
     latencies = []
     for i in range(n):
         # if i % 50 == 0:
-        # print('i = %d' % i)
+        # common.log('i = %d' % i)
         start = time.time()
         Put(i)  # i -> i
         latencies.append((time.time() - start) * 1e6)  # Microsecs.
@@ -128,7 +129,7 @@ def SeqPut(n, sleep_secs):
         ops_completed.value += 1  # No lock needed.
 
     nums = np.asarray(latencies)
-    print(
+    common.log(
         'throughput %.1f writes/sec; latency (us): mean %.5f std %.5f num %d' %
         (len(nums) * 1.0 / np.sum(nums) * 1e6, np.mean(nums), np.std(nums),
          len(nums)))
@@ -139,14 +140,15 @@ def Check(n):
     read_client, _ = RefreshTailFromMaster(master_client, _CLIENT_ID)
     actual = len(read_client.keys(b'*'))
     if actual != n:
-        print('head # keys: %d' % len(head_client.keys(b'*')))
+        common.log('head # keys: %d' % len(head_client.keys(b'*')))
     assert actual == n, "Written %d Expected %d" % (actual, n)
     for i in range(n):
         data = read_client.get(str(i))
         assert int(data) == i, i
 
 
-def test_demo():
+def test_demo(startcredis):
+    master_mode = startcredis["master_mode"]
     # Launch driver thread.
     n = 1000
     sleep_secs = 0.01
@@ -157,7 +159,9 @@ def test_demo():
     new_nodes = []
     time.sleep(0.1)
     common.KillNode(index=1)
-    new_nodes.append(common.AddNode(master_client))
+    time.sleep(0.1)
+    new_nodes.append(common.AddNode(master_client, master_mode=master_mode))
+    time.sleep(0.1)
     driver.join()
 
     assert ops_completed.value == n
@@ -168,11 +172,10 @@ def test_demo():
 
     for proc, _ in new_nodes:
         proc.kill()
-    print('Total ops %d, completed ops %d' % (n, ops_completed.value))
+    common.log('Total ops %d, completed ops %d' % (n, ops_completed.value))
 
 
-
-def test_kaa():
+def test_kaa(startcredis):
     """Kill, add, add."""
     # Launch driver thread.
     n = 1000
@@ -197,7 +200,7 @@ def test_kaa():
         proc.kill()
 
 
-def test_multi_kill_add():
+def test_multi_kill_add(startcredis):
     """Kill, add a few times."""
     # Launch driver thread.
     n = 1000
@@ -205,18 +208,25 @@ def test_multi_kill_add():
     driver = multiprocessing.Process(target=SeqPut, args=(n, sleep_secs))
     driver.start()
 
+    # Notify the master that nodes have died, rather than wait for the
+    # heartbeat by sleeping between kills.
+    if startcredis["master_mode"] == MASTER_ETCD:
+        notify = master_client
+    else:
+        notify = None
+
     # Kill / add.
     new_nodes = []
     time.sleep(0.1)
-    common.KillNode(index=1)  # 6371 dead
+    common.KillNode(index=1, notify=notify)  # 6371 dead
     new_nodes.append(common.AddNode(master_client))  # 6372
-    common.KillNode(index=1)  # 6372 dead
+    common.KillNode(index=1, notify=notify)  # 6372 dead
     new_nodes.append(common.AddNode(master_client))  # 6373
-    common.KillNode(index=0)  # 6370 dead, now [6373]
+    common.KillNode(index=0, notify=notify)  # 6370 dead, now [6373]
     new_nodes.append(common.AddNode(master_client))  # 6374
     new_nodes.append(common.AddNode(master_client))  # 6375
     # Now [6373, 6374, 6375].
-    common.KillNode(index=2)  # 6375 dead, now [6373, 6374]
+    common.KillNode(index=2, notify=notify)  # 6375 dead, now [6373, 6374]
 
     driver.join()
 
@@ -230,7 +240,7 @@ def test_multi_kill_add():
         proc.kill()
 
 
-def test_dead_old_tail_when_adding():
+def test_dead_old_tail_when_adding(startcredis):
     # We set "sleep_secs" to a higher value.  So "kill tail", "add node" will
     # be trigered without a refresh request from the driver.  Master will have
     # the following view of its members:
@@ -258,8 +268,177 @@ def test_dead_old_tail_when_adding():
     proc.kill()
 
 
-def BenchCredis(num_nodes, num_ops, num_clients):
-    common.Start(chain=common.MakeChain(num_nodes))
+def test_etcd_kill_middle(startcredis_etcdonly):
+    """ Test that if the middle node is removed, the tail continues to get updates
+    once the chain is repaired.
+    """
+    # Start members with a quick heartbeat timeout.
+    common.Start(
+        chain=common.MakeChain(3),
+        master_mode=MASTER_ETCD,
+        heartbeat_interval=1,
+        heartbeat_timeout=2)
+
+    # Launch driver thread.
+    n = 100
+    sleep_secs = 0.1
+    driver = multiprocessing.Process(target=SeqPut, args=(n, sleep_secs))
+    driver.start()
+
+    time.sleep(0.1)
+    middle_port = common.PortForNode(1)
+    common.KillNode(index=1, notify=master_client)
+    driver.join()
+
+    assert ops_completed.value == n
+    chain = master_client.execute_command('MASTER.GET_CHAIN')
+    assert len(chain) == 2 - 1 + 1, 'chain %s' % chain
+    Check(ops_completed.value)
+
+
+def test_etcd_heartbeat_timeout(startcredis_etcdonly):
+    """ Test that failure is detected and repaired within a heartbeat timeout.
+    """
+    # Start members with a quick heartbeat timeout.
+    common.Start(
+        chain=common.MakeChain(3),
+        master_mode=MASTER_ETCD,
+        heartbeat_interval=1,
+        heartbeat_timeout=2)
+
+    # Launch driver thread. Note that it will take a minimum of 10 seconds.
+    n = 10
+    sleep_secs = 1
+    driver = multiprocessing.Process(target=SeqPut, args=(n, sleep_secs))
+    driver.start()
+
+    time.sleep(0.1)
+    middle_port = common.PortForNode(1)
+    common.KillNode(index=1) # Don't notify master
+    # Heartbeat should expire within 2 sec.
+    driver.join()
+
+    assert ops_completed.value == n
+    chain = master_client.execute_command('MASTER.GET_CHAIN')
+    assert len(chain) == 2 - 1 + 1, 'chain %s' % chain
+    Check(ops_completed.value)
+
+
+def test_etcd_master_recovery(startcredis_etcdonly):
+    """ Test that the master can recover its state from etcd.
+    """
+    common.Start(
+        chain=common.MakeChain(3),
+        master_mode=MASTER_ETCD,
+        heartbeat_interval=1,
+        heartbeat_timeout=10)
+
+    chain = master_client.execute_command('MASTER.GET_CHAIN')
+    head = master_client.execute_command('MASTER.REFRESH_HEAD')
+    tail = master_client.execute_command('MASTER.REFRESH_TAIL')
+    assert len(chain) == 3, 'chain %s' % chain
+
+    common.KillMaster()
+    time.sleep(0.2)
+    common.StartMaster(master_mode=MASTER_ETCD)
+    time.sleep(0.1)
+
+    assert chain == master_client.execute_command('MASTER.GET_CHAIN')
+    assert head == master_client.execute_command('MASTER.REFRESH_HEAD')
+    assert tail == master_client.execute_command('MASTER.REFRESH_TAIL')
+
+    new_node, _ = common.AddNode(master_client)
+
+    # Sanity check that normal operation can continue.
+    assert len(master_client.execute_command('MASTER.GET_CHAIN')) == 4
+
+    new_node.kill()
+
+
+def test_etcd_master_online_recovery(startcredis_etcdonly):
+    """ Test that SeqPut succeeds when the master is killed and restarted mid-way, then a member is
+    killed, then a member is added. The restarted master should be able to recover the chain, with
+    the new member being the tail, and no updates should be lost.
+    """
+    common.Start(
+        chain=common.MakeChain(3),
+        master_mode=MASTER_ETCD,
+        heartbeat_interval=1,
+        heartbeat_timeout=10)
+
+    # Launch driver thread. Note that it will take a minimum of 10 seconds.
+    n = 10
+    sleep_secs = 1
+    driver = multiprocessing.Process(target=SeqPut, args=(n, sleep_secs))
+    driver.start()
+
+    time.sleep(0.1)
+    common.KillMaster()
+    common.StartMaster(master_mode=MASTER_ETCD)
+    time.sleep(0.1)
+    assert len(master_client.execute_command('MASTER.GET_CHAIN')) == 3
+
+    time.sleep(0.1)
+    middle_port = common.PortForNode(1)
+    common.KillNode(index=1, notify=master_client)
+    assert len(master_client.execute_command('MASTER.GET_CHAIN')) == 2
+
+    new_node, _ = common.AddNode(master_client, master_mode=MASTER_ETCD)
+    time.sleep(0.1)
+    driver.join()
+    assert len(master_client.execute_command('MASTER.GET_CHAIN')) == 3
+
+    # Heartbeat should expire within 2 sec.
+    driver.join()
+
+    assert ops_completed.value == n
+    Check(ops_completed.value)
+
+    # Cleanup
+    new_node.kill()
+
+
+def test_etcd_kill_node_while_master_is_dead(startcredis_etcdonly):
+    """ Test that SeqPut succeeds when the master is killed and a node is killed WHILE the master is
+    dead. The master is then restarted. No updates should be lost.
+
+    TODO: Fails (3/28) because members are not checked for liveness when the master starts up.
+    """
+    # Choose a long heartbeat timeout so that the master never receives heartbeat expiry notifs.
+    common.Start(
+        chain=common.MakeChain(3),
+        master_mode=MASTER_ETCD,
+        heartbeat_interval=1,
+        heartbeat_timeout=999)
+
+    # Launch driver thread. Note that it will take a minimum of 10 seconds.
+    n = 10
+    sleep_secs = 1
+    driver = multiprocessing.Process(target=SeqPut, args=(n, sleep_secs))
+    driver.start()
+
+    time.sleep(0.1)
+    common.KillMaster()
+    common.KillNode(index=1)
+    common.StartMaster(master_mode=MASTER_ETCD)
+    time.sleep(0.2)
+    assert len(master_client.execute_command('MASTER.GET_CHAIN')) == 2
+
+    new_node, _ = common.AddNode(master_client, master_mode=MASTER_ETCD)
+    time.sleep(0.1)
+    assert len(master_client.execute_command('MASTER.GET_CHAIN')) == 3
+
+    driver.join()
+
+    assert ops_completed.value == n
+    Check(ops_completed.value)
+
+    # Cleanup
+    new_node.kill()
+
+
+def BenchCredis(num_nodes, num_ops, num_clients, master_mode):
+    common.Start(chain=common.MakeChain(num_nodes), master_mode=master_mode)
     time.sleep(0.1)
 
     # TODO(zongheng): ops_completed needs to be changed
@@ -277,7 +456,6 @@ def BenchCredis(num_nodes, num_ops, num_clients):
     assert ops_completed.value == num_ops
     Check(ops_completed.value)
 
-
 def BenchVanillaRedis(num_ops):
     common.Start(chain=common.MakeChain(1))
     time.sleep(0.1)
@@ -288,12 +466,24 @@ def BenchVanillaRedis(num_ops):
         i_str = str(i)  # Serialize once.
         r.execute_command('SET', i_str, i_str)
     total_secs = time.time() - start
-    print('throughput %.1f writes/sec; latency (us): mean %.5f std ? num %d' %
+    common.log('throughput %.1f writes/sec; latency (us): mean %.5f std ? num %d' %
           (num_ops * 1.0 / total_secs, total_secs * 1e6 / num_ops, num_ops))
 
 
 if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--num-nodes', '-n',
+                        help='Number of nodes to create', type=int, default=3)
+    parser.add_argument('--num-ops', '-o',
+                        help='Number of ops to do', type=int, default=500000)
+    parser.add_argument('--num-clients', '-c',
+                        help='Number of clients to create', type=int, default=1)
+    parser.add_argument('--master-mode', '-m', type=int,
+                        help='Master mode (0 = redis, 1 = etcd)', default=0)
+    args = parser.parse_args()
     # BenchVanillaRedis(num_ops=100000)
-    BenchCredis(num_nodes=1, num_ops=500000, num_clients=1)
+    BenchCredis(num_nodes=args.num_nodes, num_ops=args.num_ops,
+                num_clients=args.num_clients, master_mode=args.master_mode)
     # BenchCredis(num_nodes=2, num_ops=1000000)
     # BenchCredis(num_nodes=3, num_ops=100000)

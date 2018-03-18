@@ -25,6 +25,8 @@ else()
   set(REDIS_MODULE_LDFLAGS -shared)
 endif()
 
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/etcd)
+
 # timer
 add_library(timer STATIC timer.cc)
 target_compile_options(timer PUBLIC ${REDIS_MODULE_CFLAGS} -fPIC)
@@ -35,7 +37,11 @@ add_library(utils STATIC utils.cc)
 target_compile_options(utils PUBLIC ${REDIS_MODULE_CFLAGS} -fPIC)
 
 # master_client
-add_library(master_client STATIC master_client.cc)
+set(MASTER_CLIENT_IMPLS
+        redis_master_client.cc
+        etcd/etcd_master_client.cc
+)
+add_library(master_client STATIC ${MASTER_CLIENT_IMPLS})
 target_compile_options(master_client PUBLIC ${REDIS_MODULE_CFLAGS} -fPIC)
 target_link_libraries(master_client ${LevelDB_LIBRARIES})
 target_link_libraries(master_client glog::glog)
@@ -59,6 +65,8 @@ add_library(member SHARED member.cc)
 target_compile_options(member PUBLIC ${REDIS_MODULE_CFLAGS} -fPIC)
 target_link_libraries(member ${REDIS_MODULE_LDFLAGS})
 target_link_libraries(member utils)
+target_link_libraries(member etcd3)
+target_link_libraries(member etcd_utils)
 target_link_libraries(member glog::glog)
 target_link_libraries(member ${LevelDB_LIBRARIES})
 target_link_libraries(member master_client)

@@ -52,8 +52,6 @@ class MasterClient {
  protected:
   const char* WatermarkKey(Watermark w) const;
 
-  std::unique_ptr<redisContext> redis_context_;
-
   static constexpr int64_t kSnCkptInit = 0;
   static constexpr int64_t kSnFlushedInit = 0;
 };
@@ -68,6 +66,7 @@ class RedisMasterClient : public MasterClient {
 
  private:
   std::unique_ptr<redisContext> redis_context_;
+
 };
 
 #endif  // CREDIS_MASTER_CLIENT_H_

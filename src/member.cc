@@ -1,30 +1,23 @@
 #include <assert.h>
 #include <ctype.h>
 #include <stdlib.h>
-#include <string>
-
+#include <string.h>
 #include <map>
-#include <memory>
 #include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
-
 extern "C" {
 #include "hiredis/adapters/ae.h"
 #include "hiredis/async.h"
 #include "hiredis/hiredis.h"
-#include "redismodule.h"
-}
-
-extern "C" {
+#include "redis/src/redismodule.h"
 #include "redis/src/ae.h"
 }
 
 #include "glog/logging.h"
 #include "leveldb/db.h"
 #include "leveldb/write_batch.h"
-
 #include "master_client.h"
 #include "utils.h"
 
@@ -90,6 +83,17 @@ class RedisChainModule {
     kMiddle = 2,
     kTail = 3,
   };
+
+  enum class GcsMode : int {
+    kNormal = 0,     // (Default) No checkpointing, no flushing.
+    kCkptOnly = 1,   // Checkpointing on; flushing off.
+    kCkptFlush = 2,  // Both checkpointing & flushing on.
+  };
+  enum class MasterMode : int {
+    kRedis = 0,  // redis-based master.
+    kEtcd = 1,   // etcd-based master.
+  };
+
   bool ActAsHead() const {
     return chain_role_ == ChainRole::kSingleton ||
            chain_role_ == ChainRole::kHead;
@@ -99,11 +103,6 @@ class RedisChainModule {
            chain_role_ == ChainRole::kTail;
   }
 
-  enum class GcsMode : int {
-    kNormal = 0,     // (Default) No checkpointing, no flushing.
-    kCkptOnly = 1,   // Checkpointing on; flushing off.
-    kCkptFlush = 2,  // Both checkpointing & flushing on.
-  };
   GcsMode GcsMode() const {
     CHECK(gcs_mode_initialized_);
     return gcs_mode_;
@@ -127,10 +126,6 @@ class RedisChainModule {
     }
   }
 
-  enum class MasterMode : int {
-    kRedis = 0,  // redis-based master.
-    kEtcd = 1,   // etcd-based master.
-  };
   MasterMode MasterMode() const {
     CHECK(master_mode_initialized_);
     return master_mode_;

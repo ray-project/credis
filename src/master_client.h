@@ -60,11 +60,11 @@ class MasterClient {
 
 class RedisMasterClient : public MasterClient {
  public:
-  virtual Status Connect(const std::string& address, int port) override;
-  virtual Status Head(std::string* address, int* port) override;
-  virtual Status Tail(std::string* address, int* port) override;
-  virtual Status GetWatermark(Watermark w, int64_t* val) const override;
-  virtual Status SetWatermark(Watermark w, int64_t new_val) override;
+  Status Connect(const std::string& address, int port) override;
+  Status Head(std::string* address, int* port) override;
+  Status Tail(std::string* address, int* port) override;
+  Status GetWatermark(Watermark w, int64_t* val) const override;
+  Status SetWatermark(Watermark w, int64_t new_val) override;
 
  private:
   std::unique_ptr<redisContext> redis_context_;

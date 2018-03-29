@@ -4,7 +4,7 @@
 
 #include "utils.h"
 
-Status MasterClient::Connect(const std::string& address, int port) {
+Status RedisMasterClient::Connect(const std::string& address, int port) {
   redis_context_.reset(SyncConnect(address, port));
   return Status::OK();
 }
@@ -13,7 +13,7 @@ const char* MasterClient::WatermarkKey(Watermark w) const {
   return w == MasterClient::Watermark::kSnCkpt ? "_sn_ckpt" : "_sn_flushed";
 }
 
-Status MasterClient::GetWatermark(Watermark w, int64_t* val) const {
+Status RedisMasterClient::GetWatermark(Watermark w, int64_t* val) const {
   redisReply* reply = reinterpret_cast<redisReply*>(
       redisCommand(redis_context_.get(), "GET %s", WatermarkKey(w)));
   const std::string reply_str(reply->str, reply->len);  // Can be optimized
@@ -39,7 +39,7 @@ Status MasterClient::GetWatermark(Watermark w, int64_t* val) const {
   return Status::OK();
 }
 
-Status MasterClient::SetWatermark(Watermark w, int64_t new_val) {
+Status RedisMasterClient::SetWatermark(Watermark w, int64_t new_val) {
   const char* new_val_data = reinterpret_cast<const char*>(&new_val);
 
   redisReply* reply = reinterpret_cast<redisReply*>(
@@ -52,4 +52,13 @@ Status MasterClient::SetWatermark(Watermark w, int64_t new_val) {
 
   freeReplyObject(reply);
   return Status::OK();
+}
+
+Status RedisMasterClient::Head(std::string* address, int* port) {
+  CHECK(false) << "Not implemented";
+  return Status::NotSupported("Not implemented");
+}
+Status RedisMasterClient::Tail(std::string* address, int* port) {
+  CHECK(false) << "Not implemented";
+  return Status::NotSupported("Not implemented");
 }

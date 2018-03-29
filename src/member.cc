@@ -2,29 +2,22 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include <map>
-#include <memory>
 #include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
-
 extern "C" {
 #include "hiredis/adapters/ae.h"
 #include "hiredis/async.h"
 #include "hiredis/hiredis.h"
-#include "redismodule.h"
-}
-
-extern "C" {
+#include "redis/src/redismodule.h"
 #include "redis/src/ae.h"
 }
 
 #include "glog/logging.h"
 #include "leveldb/db.h"
 #include "leveldb/write_batch.h"
-
 #include "master_client.h"
 #include "utils.h"
 
@@ -90,6 +83,17 @@ class RedisChainModule {
     kMiddle = 2,
     kTail = 3,
   };
+
+  enum class GcsMode : int {
+    kNormal = 0,     // (Default) No checkpointing, no flushing.
+    kCkptOnly = 1,   // Checkpointing on; flushing off.
+    kCkptFlush = 2,  // Both checkpointing & flushing on.
+  };
+  enum class MasterMode : int {
+    kRedis = 0,  // redis-based master.
+    kEtcd = 1,   // etcd-based master.
+  };
+
   bool ActAsHead() const {
     return chain_role_ == ChainRole::kSingleton ||
            chain_role_ == ChainRole::kHead;
@@ -99,17 +103,12 @@ class RedisChainModule {
            chain_role_ == ChainRole::kTail;
   }
 
-  enum class GcsMode : int {
-    kNormal = 0,     // (Default) No checkpointing, no flushing.
-    kCkptOnly = 1,   // Checkpointing on; flushing off.
-    kCkptFlush = 2,  // Both checkpointing & flushing on.
-  };
-  GcsMode Mode() const {
+  GcsMode GcsMode() const {
     CHECK(gcs_mode_initialized_);
     return gcs_mode_;
   }
   // Initialized on module startup; immutable afterwards.
-  void SetGcsMode(GcsMode mode) {
+  void SetGcsMode(enum GcsMode mode) {
     CHECK(!gcs_mode_initialized_);
     gcs_mode_ = mode;
     gcs_mode_initialized_ = true;
@@ -127,11 +126,43 @@ class RedisChainModule {
     }
   }
 
+  MasterMode MasterMode() const {
+    CHECK(master_mode_initialized_);
+    return master_mode_;
+  }
+  // Initialized on module startup; immutable afterwards.
+  void SetMasterMode(enum MasterMode mode) {
+    CHECK(!master_mode_initialized_);
+    master_mode_ = mode;
+    master_mode_initialized_ = true;
+  }
+  std::string MasterModeString() const {
+    switch (master_mode_) {
+      case MasterMode::kRedis:
+        return "kRedis";
+      case MasterMode::kEtcd:
+        return "kEtcd";
+      default:
+        CHECK(false);
+    }
+  }
+
   RedisChainModule()
       : chain_role_(ChainRole::kSingleton),
         gcs_mode_(GcsMode::kNormal),
+        master_mode_(MasterMode::kRedis),
         parent_(NULL),
-        child_(NULL) {}
+        child_(NULL) {
+    switch(master_mode_) {
+      case MasterMode::kRedis:
+        master_client_ = std::unique_ptr<MasterClient>(new RedisMasterClient());
+        break;
+      case MasterMode::kEtcd:
+        CHECK(false) << "Etcd master client is unimplemented";
+      default:
+        CHECK(false) << "Unrecognized master mode " << MasterModeString();
+    }
+  }
 
   ~RedisChainModule() {
     if (child_) redisAsyncFree(child_);
@@ -167,9 +198,9 @@ class RedisChainModule {
   }
 
   Status ConnectToMaster(const std::string& address, int port) {
-    return master_client_.Connect(address, port);
+    return master_client_->Connect(address, port);
   }
-  MasterClient& Master() { return master_client_; }
+  MasterClient* Master() { return master_client_.get(); }
 
   Status OpenCheckpoint(leveldb::DB** db) {
     static leveldb::Options options;
@@ -228,11 +259,13 @@ class RedisChainModule {
   std::string next_address_;
   std::string next_port_;
 
-  MasterClient master_client_;
+  std::unique_ptr<MasterClient> master_client_;
 
   ChainRole chain_role_;
-  GcsMode gcs_mode_;
+  enum GcsMode gcs_mode_;
+  enum MasterMode master_mode_;
   bool gcs_mode_initialized_ = false;  // To guard against re-initialization.
+  bool master_mode_initialized_ = false;  // To guard against re-initialization.
 
   // The previous node in the chain (or NULL if none)
   redisAsyncContext* parent_;
@@ -287,7 +320,7 @@ void RedisChainModule::CleanUpSnToKeyLessThan(int64_t sn) {
 int DoFlush(RedisModuleCtx* ctx,
             int64_t advanced_sn_flushed,
             const std::vector<std::string>& flushable_keys) {
-  CHECK(module.Mode() == RedisChainModule::GcsMode::kCkptFlush);
+  CHECK(module.GcsMode() == RedisChainModule::GcsMode::kCkptFlush);
   CHECK(flushable_keys.size() <= 1) << "Support single key deletion for now.";
 
   if (!flushable_keys.empty()) {
@@ -308,7 +341,7 @@ int DoFlush(RedisModuleCtx* ctx,
 
   // Done, or propagate.  We do this even if flushable_keys is empty.
   if (module.ActAsTail()) {
-    Status s = module.Master().SetWatermark(MasterClient::Watermark::kSnFlushed,
+    Status s = module.Master()->SetWatermark(MasterClient::Watermark::kSnFlushed,
                                             advanced_sn_flushed);
     HandleNonOk(ctx, s);
   } else {
@@ -356,7 +389,7 @@ int Put(RedisModuleCtx* ctx,
     // The tail has the responsibility of updating the sn_flushed watermark.
     if (module.ActAsTail()) {
       // "sn + 1" is the next sn to be flushed.
-      module.Master().SetWatermark(MasterClient::Watermark::kSnFlushed, sn + 1);
+      module.Master()->SetWatermark(MasterClient::Watermark::kSnFlushed, sn + 1);
     }
     RedisModule_CloseKey(key);
   } else {
@@ -370,7 +403,7 @@ int Put(RedisModuleCtx* ctx,
     const std::string key_str(ReadString(name));
     // NOTE(zongheng): this can be slow, see the note in class declaration.
     module.sn_to_key()[sn] = key_str;
-    if (module.Mode() == RedisChainModule::GcsMode::kCkptFlush) {
+    if (module.GcsMode() == RedisChainModule::GcsMode::kCkptFlush) {
       module.key_to_sn()[key_str] = sn;
     }
     module.record_sn(static_cast<int64_t>(sn));
@@ -748,7 +781,7 @@ int TailCheckpoint_RedisCommand(RedisModuleCtx* ctx,
     return RedisModule_ReplyWithError(
         ctx, "ERR this command must be called on the tail.");
   }
-  if (module.Mode() == RedisChainModule::GcsMode::kNormal) {
+  if (module.GcsMode() == RedisChainModule::GcsMode::kNormal) {
     return RedisModule_ReplyWithError(
         ctx, "ERR redis server's GcsMode is set to kNormal.");
   }
@@ -759,7 +792,7 @@ int TailCheckpoint_RedisCommand(RedisModuleCtx* ctx,
   int64_t sn_ckpt = 0;
   DLOG(INFO) << "getting watermark";
   Status s =
-      module.Master().GetWatermark(MasterClient::Watermark::kSnCkpt, &sn_ckpt);
+      module.Master()->GetWatermark(MasterClient::Watermark::kSnCkpt, &sn_ckpt);
   DLOG(INFO) << "done getting watermark " << s.ToString();
   HandleNonOk(ctx, s);
   const int64_t sn_latest = module.sn();
@@ -795,7 +828,7 @@ int TailCheckpoint_RedisCommand(RedisModuleCtx* ctx,
   s = ckpt->Write(leveldb::WriteOptions(), &batch);
   HandleNonOk(ctx, s);
 
-  s = module.Master().SetWatermark(MasterClient::Watermark::kSnCkpt,
+  s = module.Master()->SetWatermark(MasterClient::Watermark::kSnCkpt,
                                    sn_latest + 1);
   HandleNonOk(ctx, s);
 
@@ -816,7 +849,7 @@ int HeadFlush_RedisCommand(RedisModuleCtx* ctx,
     return RedisModule_ReplyWithError(
         ctx, "ERR this command must be called on the head.");
   }
-  if (module.Mode() != RedisChainModule::GcsMode::kCkptFlush) {
+  if (module.GcsMode() != RedisChainModule::GcsMode::kCkptFlush) {
     return RedisModule_ReplyWithError(
         ctx, "ERR redis server's GcsMode is NOT set to kCkptFlush.");
   }
@@ -824,9 +857,9 @@ int HeadFlush_RedisCommand(RedisModuleCtx* ctx,
   // Read watermarks from master.
   // Clearly, we can provide a batch iface.
   int64_t sn_ckpt = 0, sn_flushed = 0;
-  HandleNonOk(ctx, module.Master().GetWatermark(
+  HandleNonOk(ctx, module.Master()->GetWatermark(
                        MasterClient::Watermark::kSnCkpt, &sn_ckpt));
-  HandleNonOk(ctx, module.Master().GetWatermark(
+  HandleNonOk(ctx, module.Master()->GetWatermark(
                        MasterClient::Watermark::kSnFlushed, &sn_flushed));
 
   const auto& sn_to_key = module.sn_to_key();
@@ -979,6 +1012,7 @@ extern "C" {
 //   argv[0] indicates the GcsMode: 0 for kNormal, 1 kCkptOnly, 2 kCkptFlush.
 // If not specified, defaults to kNormal (checkpointing and flushing turned
 // off).
+//   argv[1] indicates the MasterType: 0 for redis (default), 1 for etcd
 int RedisModule_OnLoad(RedisModuleCtx* ctx,
                        RedisModuleString** argv,
                        int argc) {
@@ -1007,6 +1041,23 @@ int RedisModule_OnLoad(RedisModuleCtx* ctx,
     break;
   default:
     return REDISMODULE_ERR;
+  }
+  LOG(INFO) << "GcsMode: " << module.GcsModeString();
+
+  long long master_mode = 0;
+  if (argc > 1) {
+    CHECK_EQ(REDISMODULE_OK,
+             RedisModule_StringToLongLong(argv[0], &master_mode));
+  }
+  switch (master_mode) {
+    case 0:
+      module.SetMasterMode(RedisChainModule::MasterMode::kRedis);
+      break;
+    case 1:
+      module.SetMasterMode(RedisChainModule::MasterMode::kEtcd);
+      break;
+    default:
+      return REDISMODULE_ERR;
   }
   LOG(INFO) << "GcsMode: " << module.GcsModeString();
 

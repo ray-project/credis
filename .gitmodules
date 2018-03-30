@@ -13,3 +13,6 @@
 [submodule "etcd3-cpp"]
 	path = etcd3
 	url = https://github.com/graysonchao/etcd3-cpp
+[submodule "nlohmann"]
+	path = nlohmann
+	url = https://github.com/nlohmann/json

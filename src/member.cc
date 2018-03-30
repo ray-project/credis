@@ -203,25 +203,14 @@ class RedisChainModule {
         master_mode_(MasterMode::kRedis),
         parent_(NULL),
         child_(NULL) {
-<<<<<<< HEAD
-    switch (master_mode_) {
+    switch(master_mode_) {
     case MasterMode::kRedis:
       master_client_ = std::unique_ptr<MasterClient>(new RedisMasterClient());
       break;
     case MasterMode::kEtcd:
-      CHECK(false) << "Etcd master client is unimplemented";
+      master_client_ = std::unique_ptr<MasterClient>(new EtcdMasterClient());
     default:
       CHECK(false) << "Unrecognized master mode " << MasterModeString();
-=======
-    switch(master_mode_) {
-      case MasterMode::kRedis:
-        master_client_ = std::unique_ptr<MasterClient>(new RedisMasterClient());
-        break;
-      case MasterMode::kEtcd:
-        master_client_ = std::unique_ptr<MasterClient>(new EtcdMasterClient());
-      default:
-        CHECK(false) << "Unrecognized master mode " << MasterModeString();
->>>>>>> Implement fault-tolerant master with etcd
     }
   }
 
@@ -1275,26 +1264,6 @@ int RedisModule_OnLoad(RedisModuleCtx* ctx,
       break;
     default:
       return REDISMODULE_ERR;
-  }
-  RedisModule_Log(ctx,
-                  "notice",
-                  "Master mode: %s",
-                  module.MasterModeString().c_str());
-
-  long long master_mode = 0;
-  if (argc > 1) {
-    CHECK_EQ(REDISMODULE_OK,
-             RedisModule_StringToLongLong(argv[1], &master_mode));
-  }
-  switch (master_mode) {
-  case 0:
-    module.SetMasterMode(RedisChainModule::MasterMode::kRedis);
-    break;
-  case 1:
-    module.SetMasterMode(RedisChainModule::MasterMode::kEtcd);
-    break;
-  default:
-    return REDISMODULE_ERR;
   }
   RedisModule_Log(ctx,
                   "notice",

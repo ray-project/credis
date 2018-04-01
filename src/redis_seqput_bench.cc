@@ -41,8 +41,8 @@ void SeqGetCallback(redisAsyncContext* context, void* r, void* /*privdata*/) {
   // LOG(INFO) << "reply type " << reply->type << "; issued get "
   //           << last_issued_read_key;
   const std::string actual = std::string(reply->str, reply->len);
-  CHECK(last_issued_read_key == actual) << "; expected " << last_issued_read_key
-                                        << " actual " << actual;
+  CHECK(last_issued_read_key == actual)
+      << "; expected " << last_issued_read_key << " actual " << actual;
   reads_timer.TimeOpEnd(reads_completed);
   if (writes_completed + reads_completed == N) {
     aeStop(loop);

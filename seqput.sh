@@ -17,13 +17,13 @@ SERVER=${4:-127.0.0.1}
 pkill -f redis_seqput_bench
 pkill -f credis_seqput_bench
 
-#ssh -o StrictHostKeyChecking=no ubuntu@${SERVER} << EOF
-#cd ~/credis-1
-#pkill -f redis-server
-#sleep 2
-#./setup.sh $NUM_NODES
-#sleep 2
-#EOF
+ssh -o StrictHostKeyChecking=no ubuntu@${SERVER} << EOF
+cd ~/credis-1
+pkill -f redis-server
+sleep 2
+./setup.sh $NUM_NODES
+sleep 2
+EOF
 
 sleep 4
 

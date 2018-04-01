@@ -1,17 +1,6 @@
 """Usage:
 
-To launch a recording job:
-$ ./setup.sh & (sleep 1; ./seqput.sh 4) & (sleep 1; psrecord $(pgrep redis-server | tail -n1) --interval 1  --duration 120 --log records.log)
-
-$ ./setup.sh & (sleep 1; ./seqput.sh 1; sudo pkill -f redis-server) & (sleep 1; psrecord $(pgrep redis-server | tail -n1) --interval 1  --duration 120 --log records.log)
-
-To launch everything and the flusher:
-$ ./setup.sh & (sleep 1; ./seqput.sh 4) & (sleep 1; psrecord $(pgrep redis-server | tail -n1) --interval 1  --duration 120 --log records.log) & (sleep 1; python flusher.py | tee flusher.log)
-
-$ ./setup.sh & (sleep 1; ./seqput.sh 1; sudo pkill -f redis-server) & (sleep 1; psrecord $(pgrep redis-server | tail -n1) --interval 1  --duration 120 --log records.log) & (sudo rm -rf /tmp/gcs_ckpt; sleep 1; python flusher.py | tee flusher.log)
-
-# Time.
-$ ./setup.sh & (sleep 1; time ./seqput.sh 1 >seqput-time.log; sudo pkill -f redis-server) & (sleep 1; psrecord $(pgrep redis-server | tail -n1) --interval 1  --duration 120 --log records.log) & (sudo rm -rf /tmp/gcs_ckpt; sleep 1; python flusher.py | tee flusher.log)
+See bench-flusher.sh.
 """
 import argparse
 import logging
@@ -65,20 +54,6 @@ def Main():
         log.info("Exiting: checkpointed %d flushed %d" % (num_ckpted,
                                                           num_flushed))
 
-
-# def Main():
-#     last_op_is_ckpt = False
-#     head_client = redis.StrictRedis('127.0.0.1', PORT)
-#     while True:
-#         time.sleep(CKPT_FLUSH_INTERVAL_SECS)
-#         if not last_op_is_ckpt:
-#             r = head_client.execute_command('TAIL.CHECKPOINT')
-#             print('ckpt: %s' % r)
-#             last_op_is_ckpt = True
-#         else:
-#             r = head_client.execute_command('HEAD.FLUSH')
-#             print('flush: %s' % r)
-#             last_op_is_ckpt = False
 
 if __name__ == '__main__':
     Main()

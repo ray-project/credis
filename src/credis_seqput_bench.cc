@@ -4,12 +4,6 @@
 #include <thread>
 #include <unordered_set>
 
-#include <execinfo.h>
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-
 #include "glog/logging.h"
 
 #include "client.h"
@@ -139,8 +133,8 @@ void SeqGetCallback(redisAsyncContext* /*context*/,
   // LOG(INFO) << "reply type " << reply->type << "; issued get "
   //           << last_issued_read_key;
   const std::string actual = std::string(reply->str, reply->len);
-  CHECK(last_issued_read_key == actual) << "; expected " << last_issued_read_key
-                                        << " actual " << actual;
+  CHECK(last_issued_read_key == actual)
+      << "; expected " << last_issued_read_key << " actual " << actual;
   OnCompleteLaunchNext(&reads_timer, &reads_completed, writes_completed);
 }
 
@@ -211,22 +205,7 @@ int RetryPutTimer(aeEventLoop* loop, long long /*timer_id*/, void*) {
   return kRetryTimerMillisecs;  // Reset ae's timer to 0.
 }
 
-void handler(int sig) {
-  void* array[10];
-  size_t size;
-
-  // get void*'s for all entries on the stack
-  size = backtrace(array, 10);
-
-  // print out all the frames to stderr
-  fprintf(stderr, "Error: signal %d:\n", sig);
-  backtrace_symbols_fd(array, size, STDERR_FILENO);
-  exit(1);
-}
-
 int main(int argc, char** argv) {
-  signal(SIGSEGV, handler);  // install our handler
-
   // Parse.
   int num_chain_nodes = 1;
   if (argc > 1) num_chain_nodes = std::stoi(argv[1]);

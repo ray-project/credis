@@ -340,6 +340,7 @@ int DoFlush(RedisModuleCtx* ctx,
     RedisModule_CloseKey(rmkey);
     RedisModule_FreeString(ctx, rms);
 
+    // NOTE(zongheng): DEL seems to have some weird issues.  See below.
     // RedisModuleCallReply* reply =
     //     RedisModule_Call(ctx, "DEL", "c", key.c_str());
     // CHECK(reply != NULL);
@@ -371,6 +372,7 @@ int DoFlush(RedisModuleCtx* ctx,
 
     //   DLOG(INFO) << "  GET " << key << ": " << std::string(ptr, len);
     // }
+
     // Clean up key_to_sn.
     module.key_to_sn().erase(key);
   }
@@ -838,10 +840,11 @@ int MemberUnblockWrites_RedisCommand(RedisModuleCtx* ctx,
   return RedisModule_ReplyWithNull(ctx);
 }
 
-// const int kMaxEntriesToCkptOnce = 350000;
-// const int kMaxEntriesToFlushOnce = 350000;
-const int kMaxEntriesToCkptOnce = 1 << 30;
-const int kMaxEntriesToFlushOnce = 1 << 30;
+// TODO(zongheng): make these configurable (in current form or otherwise).
+const int kMaxEntriesToCkptOnce = 350000;
+const int kMaxEntriesToFlushOnce = 350000;
+// const int kMaxEntriesToCkptOnce = 1 << 30;
+// const int kMaxEntriesToFlushOnce = 1 << 30;
 
 // TAIL.CHECKPOINT: incrementally checkpoint in-memory entries to durable
 // storage.
@@ -925,7 +928,7 @@ int TailCheckpoint_RedisCommand(RedisModuleCtx* ctx,
 
 // HEAD.FLUSH: incrementally flush checkpointed entries out of memory.
 //
-// Replies to the client # of keys removed from redis state.
+// Replies to the client # of keys removed from redis state, including 0.
 //
 // Errors out if not called on the head, or if GcsMode is not kCkptFlush.
 int HeadFlush_RedisCommand(RedisModuleCtx* ctx,
@@ -964,20 +967,6 @@ int HeadFlush_RedisCommand(RedisModuleCtx* ctx,
   const double end = timer.NowMicrosecs();
   LOG(INFO) << "HeadFlush took " << (end - start) / 1e3 << " ms";
   return result;
-
-  // RedisModuleString* key =
-  //     RedisModule_CreateString(ctx, it->second.data(),
-  //     it->second.size());
-  // int reply = Put(ctx, key, /*data=*/NULL, argv[1],
-  //                 sn_flushed,  // original sn that introduced this key
-  //                 /*is_flush=*/true);
-  // // TODO(zongheng): check error.
-  // RedisModule_FreeString(ctx, key);
-  // return reply;
-  // }
-
-  // // sn_ckpt has not been incremented, so no new data can be flushed yet.
-  // return RedisModule_ReplyWithSimpleString(ctx, "Nothing to flush");
 }
 
 // Internal command that propagates a flush.  Users should never call.

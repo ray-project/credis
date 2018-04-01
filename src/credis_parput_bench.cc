@@ -106,8 +106,8 @@ int main() {
   aeMain(loop);
   LOG(INFO) << "ending loop";
   auto end = std::chrono::system_clock::now();
-  CHECK(num_completed == N) << "num_completed " << num_completed << " vs N "
-                            << N;
+  CHECK(num_completed == N)
+      << "num_completed " << num_completed << " vs N " << N;
 
   const float latency_sum = Sum(latencies);
   const float latency_mean = latency_sum / N;

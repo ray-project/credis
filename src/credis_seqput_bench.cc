@@ -51,9 +51,12 @@ void SeqPutCallback(redisAsyncContext*, void*, void*);
 void SeqGetCallback(redisAsyncContext*, void*, void*);
 void AsyncPut(bool);
 void AsyncGet();
+void AsyncNoReply();
 
 // Launch a GET or PUT, depending on "write_ratio".
 void AsyncRandomCommand() {
+  // AsyncNoReply();
+
   static std::uniform_real_distribution<double> unif(0.0, 1.0);
   const double r = unif(re);
   if (r < kWriteRatio || writes_completed == 0) {
@@ -106,6 +109,19 @@ void AsyncPut(bool is_retry) {
       /*privdata=*/NULL, "MEMBER.PUT %b %b %b", data.data(), data.size(),
       data.data(), data.size(), client_id.data(), client_id.size());
   CHECK(status == REDIS_OK);
+}
+
+void AsyncNoReplyCallback(redisAsyncContext* write_context,  // != ack_context.
+                          void* r,
+                          void*) {
+  CHECK(0) << "Should never be called";
+}
+void AsyncNoReply() {
+  const int status =
+      redisAsyncCommand(write_context, /*callback=*/&AsyncNoReplyCallback,
+                        /*privdata=*/NULL, "NOREPLY");
+  CHECK(status == REDIS_OK);
+  LOG(INFO) << "Done issuing AsyncNoReply";
 }
 
 // Get(i), for a random i in [0, writes_completed).
@@ -166,6 +182,7 @@ void SeqPutAckCallback(redisAsyncContext* ack_context,  // != write_context.
   if (reply->element[2]->str == nullptr) {
     LOG(INFO) << getpid() << " subscribed";
     LOG(INFO) << getpid() << " chan: " << reply->element[1]->str;
+    AsyncRandomCommand();
     return;
   }
   const int64_t received_sn = std::stoi(reply->element[2]->str);
@@ -222,10 +239,25 @@ int main(int argc, char** argv) {
   RedisClient client;
   CHECK(client.Connect(server, write_port, ack_port).ok());
   CHECK(client.AttachToEventLoop(loop).ok());
+
+  // NOTE(zongheng): RegisterAckCallback() subscribes ME to a channel.
+  // SeqPutAckCallback is responsible for listening for:
+  //
+  // (1) (setup) on subscribe success;
+  // (2) (normal state) the ack for every Put.
+  //
+  // On receipt of (1): it's responsible for firing the first command, via
+  // AsyncRandomCommand(). This is critical for correctness as if we issue the
+  // first command prior to knowing for sure we're subscribed, we could be
+  // missing the initial ACKs, causing unnecessary retries.
+  //
+  // On receipt of (2): it issues another call to AsyncRandomCommand().  Hence
+  // this client program is sequential.
   CHECK(client
             .RegisterAckCallback(
                 static_cast<redisCallbackFn*>(&SeqPutAckCallback))
             .ok());
+
   write_context = client.write_context();
   read_context = client.read_context();
 
@@ -239,9 +271,6 @@ int main(int argc, char** argv) {
   std::this_thread::sleep_for(std::chrono::seconds(1));
   LOG(INFO) << "starting bench";
   auto start = std::chrono::system_clock::now();
-
-  // Start with first query, and each callback will launch the next.
-  AsyncRandomCommand();
 
   // LOG(INFO) << "start loop";
   aeMain(loop);

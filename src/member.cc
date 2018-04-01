@@ -681,6 +681,16 @@ int MemberPut_RedisCommand(RedisModuleCtx* ctx,
   }
 }
 
+int NoReply_RedisCommand(RedisModuleCtx* ctx,
+                         RedisModuleString** argv,
+                         int argc) {
+  if (argc != 1) {
+    return RedisModule_WrongArity(ctx);
+  }
+  LOG(INFO) << "Processed NoReply";
+  return 0;  // STATUS_OK
+}
+
 // Propagate a put request down the chain
 // argv[1] is the key for the data
 // argv[2] is the data
@@ -1188,6 +1198,12 @@ int RedisModule_OnLoad(RedisModuleCtx* ctx,
     return REDISMODULE_ERR;
   }
   if (RedisModule_CreateCommand(ctx, "MEMBER.SN", MemberSn_RedisCommand,
+                                "readonly",
+                                /*firstkey=*/-1, /*lastkey=*/-1,
+                                /*keystep=*/0) == REDISMODULE_ERR) {
+    return REDISMODULE_ERR;
+  }
+  if (RedisModule_CreateCommand(ctx, "NOREPLY", NoReply_RedisCommand,
                                 "readonly",
                                 /*firstkey=*/-1, /*lastkey=*/-1,
                                 /*keystep=*/0) == REDISMODULE_ERR) {

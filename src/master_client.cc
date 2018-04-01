@@ -35,7 +35,7 @@ Status RedisMasterClient::GetWatermark(Watermark w, int64_t* val) const {
   }
 
   *val = *reinterpret_cast<const int64_t*>(reply_str.data());
-  LOG(INFO) << "GET " << WatermarkKey(w) << ": " << *val;
+  DLOG(INFO) << "GET " << WatermarkKey(w) << ": " << *val;
   return Status::OK();
 }
 
@@ -47,7 +47,8 @@ Status RedisMasterClient::SetWatermark(Watermark w, int64_t new_val) {
                    new_val_data, sizeof(int64_t)));
 
   std::string reply_str(reply->str, reply->len);  // Can be optimized
-  LOG(INFO) << "SET " << WatermarkKey(w) << " " << new_val << ": " << reply_str;
+  DLOG(INFO) << "SET " << WatermarkKey(w) << " " << new_val << ": "
+             << reply_str;
   CHECK(reply_str == "OK");
 
   freeReplyObject(reply);

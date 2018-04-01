@@ -29,7 +29,7 @@ sleep 4
 
 for i in $(seq 1 $NUM_CLIENTS); do
   logfile=${NUM_CLIENTS}clients-${i}-chain-${NUM_NODES}node-wr${WRITE_RATIO}.log
-    ./build/src/credis_seqput_bench $NUM_NODES $WRITE_RATIO $SERVER >${logfile} 2>&1 &
+  ./build/src/credis_seqput_bench $NUM_NODES $WRITE_RATIO $SERVER >${logfile} 2>&1 &
 done
 wait
 

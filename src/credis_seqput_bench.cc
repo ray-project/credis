@@ -9,6 +9,10 @@
 #include "client.h"
 #include "timer.h"
 
+// TODO(zongheng): timeout should be using exponential backoff and/or some
+// randomization; this is critical in distributed settings (e.g., multiple
+// processes running this same program) to avoid catastrophic failures.
+
 // To launch with 2 servers:
 //
 //   pkill -f redis-server; ./setup.sh 2; make -j;
@@ -16,7 +20,7 @@
 //
 // If "2" is omitted in the above, by default 1 server is used.
 
-const int N = 50000;
+const int N = 1000000;
 // const int N = 500000;
 aeEventLoop* loop = aeCreateEventLoop(64);
 int writes_completed = 0;
@@ -180,13 +184,14 @@ void SeqPutAckCallback(redisAsyncContext* ack_context,  // != write_context.
   OnCompleteLaunchNext(&writes_timer, &writes_completed, reads_completed);
 }
 
-const double kRetryTimeoutMicrosecs = 500000;
+// const double kRetryTimeoutMicrosecs = 500000;
+const double kRetryTimeoutMicrosecs = 5 * 1e6;  // 5 sec
 int RetryPutTimer(aeEventLoop* loop, long long /*timer_id*/, void*) {
   const double now_us = writes_timer.NowMicrosecs();
   const double diff = now_us - last_unacked_timestamp;
   if (last_unacked_timestamp > 0 && diff > kRetryTimeoutMicrosecs) {
     LOG(INFO) << "Retrying PUT " << writes_completed;
-    LOG(INFO) << " time diff " << diff << "; last_unacked_seqnum "
+    LOG(INFO) << " time diff (us) " << diff << "; last_unacked_seqnum "
               << last_unacked_seqnum;
     // If the ACK comes back later, we should ignore it.
     if (last_unacked_seqnum >= 0) {

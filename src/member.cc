@@ -27,8 +27,6 @@ Timer timer;
 const char* const kCheckpointPath =
     "/tmp/gcs_ckpt";  // TODO(zongheng): don't hardcode.
 const char* const kCheckpointHeaderKey = "";
-const char* const kStringZero = "0";
-const char* const kStringOne = "1";
 
 extern "C" {
 aeEventLoop* getEventLoop();
@@ -451,38 +449,24 @@ int Put(RedisModuleCtx* ctx,
         RedisModuleString* name,
         RedisModuleString* data,
         RedisModuleString* client_id,
-        long long sn,
-        bool is_flush) {
-  // State maintenance.
-  if (is_flush) {
-    RedisModuleKey* key = reinterpret_cast<RedisModuleKey*>(
-        RedisModule_OpenKey(ctx, name, REDISMODULE_WRITE));
-    RedisModule_DeleteKey(key);
-    module.sn_to_key().erase(sn);
-    // The tail has the responsibility of updating the sn_flushed watermark.
-    if (module.ActAsTail()) {
-      // "sn + 1" is the next sn to be flushed.
-      module.Master()->SetWatermark(MasterClient::Watermark::kSnFlushed,
-                                    sn + 1);
-    }
-    RedisModule_CloseKey(key);
-  } else {
-    RedisModuleKey* key = reinterpret_cast<RedisModuleKey*>(
-        RedisModule_OpenKey(ctx, name, REDISMODULE_WRITE));
-    CHECK(REDISMODULE_OK == RedisModule_StringSet(key, data))
-        << "key " << key << " sn " << sn;
-    RedisModule_CloseKey(key);
+        long long sn) {
+  RedisModuleKey* key = reinterpret_cast<RedisModuleKey*>(
+      RedisModule_OpenKey(ctx, name, REDISMODULE_WRITE));
+  CHECK(REDISMODULE_OK == RedisModule_StringSet(key, data))
+      << "key " << key << " sn " << sn;
+  RedisModule_CloseKey(key);
 
-    // Update sn_to_key (for all execution modes; used for node addition
-    // codepath) and optionally key_to_sn (when flushing is on).
-    const std::string key_str(ReadString(name));
-    // NOTE(zongheng): this can be slow, see the note in class declaration.
-    module.sn_to_key()[sn] = key_str;
-    if (module.GcsMode() == RedisChainModule::GcsMode::kCkptFlush) {
-      module.key_to_sn()[key_str] = sn;
-    }
-    module.record_sn(static_cast<int64_t>(sn));
+  // State maintenance.
+  //
+  // Update sn_to_key (for all execution modes; used for node addition codepath)
+  // and optionally key_to_sn (when flushing is on).
+  const std::string key_str(ReadString(name));
+  // NOTE(zongheng): this can be slow, see the note in class declaration.
+  module.sn_to_key()[sn] = key_str;
+  if (module.GcsMode() == RedisChainModule::GcsMode::kCkptFlush) {
+    module.key_to_sn()[key_str] = sn;
   }
+  module.record_sn(static_cast<int64_t>(sn));
 
   const std::string seqnum_str = std::to_string(sn);
 
@@ -524,10 +508,9 @@ int Put(RedisModuleCtx* ctx,
       const char* cid_ptr = ReadString(client_id, &cid_len);
 
       const int status = redisAsyncCommand(
-          module.child(), NULL, NULL, "MEMBER.PROPAGATE %b %b %b %s %b",
-          key_ptr, key_len, val_ptr, val_len, seqnum_str.data(),
-          seqnum_str.size(), is_flush ? kStringOne : kStringZero, cid_ptr,
-          cid_len);
+          module.child(), NULL, NULL, "MEMBER.PROPAGATE %b %b %b %b", key_ptr,
+          key_len, val_ptr, val_len, seqnum_str.data(), seqnum_str.size(),
+          cid_ptr, cid_len);
       // TODO(zongheng): check status.
       // LOG_EVERY_N(INFO, 999999999) << "Done";
       module.sent().insert(sn);
@@ -631,9 +614,8 @@ int MemberSetRole_RedisCommand(RedisModuleCtx* ctx,
       const char* value = reader.value(&size);
       if (!module.child()->err) {
         const int status = redisAsyncCommand(
-            module.child(), NULL, NULL, "MEMBER.PROPAGATE %b %b %b %s",
-            key.data(), key.size(), value, size, sn.data(), sn.size(),
-            /*is_flush=*/kStringZero);
+            module.child(), NULL, NULL, "MEMBER.PROPAGATE %b %b %b", key.data(),
+            key.size(), value, size, sn.data(), sn.size());
         // TODO(zongheng): check status.
       }
     }
@@ -687,8 +669,7 @@ int MemberPut_RedisCommand(RedisModuleCtx* ctx,
       //                                  sn_string.size());
 
       // LOG(INFO) << "MemberPut, assigning new sn " << sn;
-      return Put(ctx, argv[1], argv[2], argv[3], sn,
-                 /*is_flush=*/false);
+      return Put(ctx, argv[1], argv[2], argv[3], sn);
     } else {
       // The store, by contract, is allowed to ignore writes during faults.
       return RedisModule_ReplyWithNull(ctx);
@@ -704,20 +685,17 @@ int MemberPut_RedisCommand(RedisModuleCtx* ctx,
 // argv[1] is the key for the data
 // argv[2] is the data
 // argv[3] is the sequence number for this update request
-// argv[4] is a long long, either 0 or 1, indicating "is_flush".
-// argv[5] is unique client id
+// argv[4] is unique client id
 int MemberPropagate_RedisCommand(RedisModuleCtx* ctx,
                                  RedisModuleString** argv,
                                  int argc) {
-  if (argc != 6) {
+  if (argc != 5) {
     return RedisModule_WrongArity(ctx);
   }
   if (!module.DropWrites()) {
-    long long sn = -1, is_flush = 0;
+    long long sn = -1;
     RedisModule_StringToLongLong(argv[3], &sn);
-    RedisModule_StringToLongLong(argv[4], &is_flush);
-    return Put(ctx, argv[1], argv[2], argv[5], sn,
-               is_flush == 0 ? false : true);
+    return Put(ctx, argv[1], argv[2], argv[4], sn);
   } else {
     // The store, by contract, is allowed to ignore writes during faults.
     return RedisModule_ReplyWithNull(ctx);

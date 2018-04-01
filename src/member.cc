@@ -84,7 +84,6 @@ class RedisChainModule {
     kMiddle = 2,
     kTail = 3,
   };
-
   enum class GcsMode : int {
     kNormal = 0,     // (Default) No checkpointing, no flushing.
     kCkptOnly = 1,   // Checkpointing on; flushing off.
@@ -104,17 +103,17 @@ class RedisChainModule {
            chain_role_ == ChainRole::kTail;
   }
 
-  GcsMode GcsMode() const {
+  GcsMode gcs_mode() const {
     CHECK(gcs_mode_initialized_);
     return gcs_mode_;
   }
   // Initialized on module startup; immutable afterwards.
-  void SetGcsMode(enum GcsMode mode) {
+  void set_gcs_mode(enum GcsMode mode) {
     CHECK(!gcs_mode_initialized_);
     gcs_mode_ = mode;
     gcs_mode_initialized_ = true;
   }
-  std::string GcsModeString() const {
+  std::string gcs_mode_string() const {
     switch (gcs_mode_) {
     case GcsMode::kNormal:
       return "kNormal";
@@ -127,17 +126,17 @@ class RedisChainModule {
     }
   }
 
-  MasterMode MasterMode() const {
+  MasterMode master_mode() const {
     CHECK(master_mode_initialized_);
     return master_mode_;
   }
   // Initialized on module startup; immutable afterwards.
-  void SetMasterMode(enum MasterMode mode) {
+  void set_master_mode(enum MasterMode mode) {
     CHECK(!master_mode_initialized_);
     master_mode_ = mode;
     master_mode_initialized_ = true;
   }
-  std::string MasterModeString() const {
+  std::string master_mode_string() const {
     switch (master_mode_) {
     case MasterMode::kRedis:
       return "kRedis";
@@ -161,7 +160,7 @@ class RedisChainModule {
     case MasterMode::kEtcd:
       CHECK(false) << "Etcd master client is unimplemented";
     default:
-      CHECK(false) << "Unrecognized master mode " << MasterModeString();
+      CHECK(false) << "Unrecognized master mode " << master_mode_string();
     }
   }
 
@@ -325,7 +324,7 @@ int DoFlush(RedisModuleCtx* ctx,
             int64_t sn_right,
             int64_t sn_ckpt,
             const std::vector<std::string>& flushable_keys) {
-  CHECK(module.GcsMode() == RedisChainModule::GcsMode::kCkptFlush);
+  CHECK(module.gcs_mode() == RedisChainModule::GcsMode::kCkptFlush);
 
   const int64_t old = module.key_to_sn().size();
 
@@ -452,8 +451,8 @@ int Put(RedisModuleCtx* ctx,
         long long sn) {
   RedisModuleKey* key = reinterpret_cast<RedisModuleKey*>(
       RedisModule_OpenKey(ctx, name, REDISMODULE_WRITE));
-  CHECK(REDISMODULE_OK == RedisModule_StringSet(key, data))
-      << "key " << key << " sn " << sn;
+  CHECK(REDISMODULE_OK == RedisModule_StringSet(key, data)) << "key " << key
+                                                            << " sn " << sn;
   RedisModule_CloseKey(key);
 
   // State maintenance.
@@ -463,7 +462,7 @@ int Put(RedisModuleCtx* ctx,
   const std::string key_str(ReadString(name));
   // NOTE(zongheng): this can be slow, see the note in class declaration.
   module.sn_to_key()[sn] = key_str;
-  if (module.GcsMode() == RedisChainModule::GcsMode::kCkptFlush) {
+  if (module.gcs_mode() == RedisChainModule::GcsMode::kCkptFlush) {
     module.key_to_sn()[key_str] = sn;
   }
   module.record_sn(static_cast<int64_t>(sn));
@@ -851,7 +850,7 @@ int TailCheckpoint_RedisCommand(RedisModuleCtx* ctx,
     return RedisModule_ReplyWithError(
         ctx, "ERR this command must be called on the tail.");
   }
-  if (module.GcsMode() == RedisChainModule::GcsMode::kNormal) {
+  if (module.gcs_mode() == RedisChainModule::GcsMode::kNormal) {
     return RedisModule_ReplyWithError(
         ctx, "ERR redis server's GcsMode is set to kNormal.");
   }
@@ -929,7 +928,7 @@ int HeadFlush_RedisCommand(RedisModuleCtx* ctx,
     return RedisModule_ReplyWithError(
         ctx, "ERR this command must be called on the head.");
   }
-  if (module.GcsMode() != RedisChainModule::GcsMode::kCkptFlush) {
+  if (module.gcs_mode() != RedisChainModule::GcsMode::kCkptFlush) {
     return RedisModule_ReplyWithError(
         ctx, "ERR redis server's GcsMode is NOT set to kCkptFlush.");
   }
@@ -1081,18 +1080,18 @@ int RedisModule_OnLoad(RedisModuleCtx* ctx,
   }
   switch (gcs_mode) {
   case 0:
-    module.SetGcsMode(RedisChainModule::GcsMode::kNormal);
+    module.set_gcs_mode(RedisChainModule::GcsMode::kNormal);
     break;
   case 1:
-    module.SetGcsMode(RedisChainModule::GcsMode::kCkptOnly);
+    module.set_gcs_mode(RedisChainModule::GcsMode::kCkptOnly);
     break;
   case 2:
-    module.SetGcsMode(RedisChainModule::GcsMode::kCkptFlush);
+    module.set_gcs_mode(RedisChainModule::GcsMode::kCkptFlush);
     break;
   default:
     return REDISMODULE_ERR;
   }
-  LOG(INFO) << "GcsMode: " << module.GcsModeString();
+  LOG(INFO) << "GcsMode: " << module.gcs_mode_string();
 
   long long master_mode = 0;
   if (argc > 1) {
@@ -1101,15 +1100,15 @@ int RedisModule_OnLoad(RedisModuleCtx* ctx,
   }
   switch (master_mode) {
   case 0:
-    module.SetMasterMode(RedisChainModule::MasterMode::kRedis);
+    module.set_master_mode(RedisChainModule::MasterMode::kRedis);
     break;
   case 1:
-    module.SetMasterMode(RedisChainModule::MasterMode::kEtcd);
+    module.set_master_mode(RedisChainModule::MasterMode::kEtcd);
     break;
   default:
     return REDISMODULE_ERR;
   }
-  LOG(INFO) << "GcsMode: " << module.GcsModeString();
+  LOG(INFO) << "GcsMode: " << module.gcs_mode_string();
 
   // Register all commands.
 

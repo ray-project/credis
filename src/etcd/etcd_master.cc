@@ -3,25 +3,25 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <string>
 #include <deque>
+#include <string>
 #include <thread>
 
 extern "C" {
-#include "redis/src/ae.h"
 #include "hiredis/async.h"
 #include "hiredis/hiredis.h"
+#include "redis/src/ae.h"
 #include "redismodule.h"
 }
 
-#include "grpcpp/grpcpp.h"
 #include "glog/logging.h"
+#include "grpcpp/grpcpp.h"
 #include "leveldb/db.h"
 #include "nlohmann/json.hpp";
 
-#include "src/utils.h"
-#include "src/etcd/etcd_utils.h"
 #include "heartbeat_monitor.h"
+#include "src/etcd/etcd_utils.h"
+#include "src/utils.h"
 
 using json = nlohmann::json;
 
@@ -46,13 +46,13 @@ void from_json(const json& j, Member& m) {
   m.address = j.at("address").get<std::string>();
   m.port = j.at("port").get<std::string>();
   m.context = redisConnect(m.address.c_str(), std::stoi(m.port));
-  if (m.context == NULL || m.context-> err) {
+  if (m.context == NULL || m.context->err) {
     LOG(INFO) << "State in etcd contains unreachable member "
-        << m.address + ":" + m.port;
+              << m.address + ":" + m.port;
   }
 }
 
-utils::EtcdURL etcd_url;
+EtcdURL etcd_url;
 std::unique_ptr<std::thread> heartbeat_monitor;
 std::shared_ptr<grpc::Channel> etcd_channel;
 std::deque<Member> members;
@@ -120,7 +120,7 @@ grpc::Status WriteChain(const std::deque<Member>& chain) {
   return etcd.Put(request, &response);
 }
 
-grpc::Status ReadChain(std::deque<Member> *chain) {
+grpc::Status ReadChain(std::deque<Member>* chain) {
   etcd3::Client etcd(etcd_channel);
   etcd3::pb::RangeRequest request;
   request.set_key(etcd_url.chain_prefix + "/members");
@@ -234,7 +234,6 @@ int MasterRemove_RedisCommand(RedisModuleCtx* ctx,
   }
   return RedisModule_ReplyWithNull(ctx);
 }
-
 
 // Handling node addition at the end of chain.
 //
@@ -421,13 +420,11 @@ int MasterRefreshTail_RedisCommand(RedisModuleCtx* ctx,
   if (members.size() == 1) {
     LOG(INFO) << "SetRole(singleton)";
     long long unused = -1;
-    SetRole(tail.context, "singleton", "nil", "nil", "nil", "nil",
-            &unused);
+    SetRole(tail.context, "singleton", "nil", "nil", "nil", "nil", &unused);
   } else {
     LOG(INFO) << "SetRole(tail)";
     long long unused = -1;
-    SetRole(tail.context, "tail", "", "", "nil", "nil",
-            &unused);
+    SetRole(tail.context, "tail", "", "", "nil", "nil", &unused);
   }
   auto status = WriteChain(members);
   if (!status.ok()) {
@@ -473,13 +470,13 @@ int RedisModule_OnLoad(RedisModuleCtx* ctx,
     return REDISMODULE_ERR;
   }
 
-  CHECK_GE(argc, 1)
-    << "Usage: --loadmodule libetcd_master.so ETCD_ADDR:ETCD_PORT/CHAIN_ID ...";
+  CHECK_GE(argc, 1) << "Usage: --loadmodule libetcd_master.so "
+                       "ETCD_ADDR:ETCD_PORT/CHAIN_ID ...";
   // Command parsing.
   auto url_str = ReadString(argv[0]);
-  etcd_url = utils::split_etcd_url(url_str);
-  etcd_channel = grpc::CreateChannel(etcd_url.address,
-                                     grpc::InsecureChannelCredentials());
+  etcd_url = SplitEtcdURL(url_str);
+  etcd_channel =
+      grpc::CreateChannel(etcd_url.address, grpc::InsecureChannelCredentials());
   if (etcd_url.chain_prefix == "/") {
     CHECK(false) << "No key name was given to store the chain! "
                  << "Supply a key name to the agent. "
@@ -498,8 +495,7 @@ int RedisModule_OnLoad(RedisModuleCtx* ctx,
                                 "write", 1, 1, 1) == REDISMODULE_ERR) {
     return REDISMODULE_ERR;
   }
-  if (RedisModule_CreateCommand(ctx, "MASTER.REMOVE",
-                                MasterRemove_RedisCommand,
+  if (RedisModule_CreateCommand(ctx, "MASTER.REMOVE", MasterRemove_RedisCommand,
                                 "write", 1, 1, 1) == REDISMODULE_ERR) {
     return REDISMODULE_ERR;
   }
@@ -523,7 +519,7 @@ int RedisModule_OnLoad(RedisModuleCtx* ctx,
   }
 
   heartbeat_monitor.reset(new std::thread(
-      [] (utils::EtcdURL url, std::shared_ptr<grpc::Channel> channel) {
+      [](EtcdURL url, std::shared_ptr<grpc::Channel> channel) {
         LOG(INFO) << "Starting heartbeat monitor.";
         int own_port = getPort();
         HeartbeatMonitor monitor(channel, own_port);
@@ -532,7 +528,8 @@ int RedisModule_OnLoad(RedisModuleCtx* ctx,
         if (!status.ok()) {
           LOG(WARNING) << status.error_message();
         }
-      }, etcd_url, etcd_channel));
+      },
+      etcd_url, etcd_channel));
 
   return REDISMODULE_OK;
 }

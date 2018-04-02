@@ -22,14 +22,14 @@ Status RedisMasterClient::GetWatermark(Watermark w, int64_t* val) const {
 
   if (reply_type == REDIS_REPLY_NIL) {
     switch (w) {
-      case Watermark::kSnCkpt:
-        *val = kSnCkptInit;
-        break;
-      case Watermark::kSnFlushed:
-        *val = kSnFlushedInit;
-        break;
-      default:
-        return Status::InvalidArgument("Watermark type incorrect");
+    case Watermark::kSnCkpt:
+      *val = kSnCkptInit;
+      break;
+    case Watermark::kSnFlushed:
+      *val = kSnFlushedInit;
+      break;
+    default:
+      return Status::InvalidArgument("Watermark type incorrect");
     }
     return Status::OK();
   }
@@ -63,4 +63,3 @@ Status RedisMasterClient::Tail(std::string* address, int* port) {
   CHECK(false) << "Not implemented";
   return Status::NotSupported("Not implemented");
 }
-

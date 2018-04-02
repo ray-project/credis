@@ -43,7 +43,26 @@ A really simple way to do this is to install Docker, and then:
 docker run -d -p 12379:2379 appcelerator/etcd
 ```
 
-Simple as that.
+To run etcd without Docker, you will need to install and run it manually.
+
+There are two options for doing this, depending on if you have Go installed.
+
+#### With Go Installed
+```$xslt
+$ go get github.com/coreos/etcd
+# Both listen-client-urls and advertise-client-urls are needed
+$ $GOPATH/bin/etcd --listen-client-urls http://127.0.0.1:12379 \
+                   --advertise-client-urls http://127.0.0.1:12379
+```
+
+#### Without Go installed
+```$xslt
+$ git clone github.com/coreos/etcd
+$ cd etcd
+$ ./build
+$ ./bin/etcd --listen-client-urls http://127.0.0.1:12379 \
+             --advertise-client-urls http://127.0.0.1:12379
+```
 
 ## Trying it out
 

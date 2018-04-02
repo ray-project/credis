@@ -1,10 +1,9 @@
 
+#include "etcd_utils.h"
 #include <string>
 #include "etcd3/include/etcd3.h"
-#include "etcd_utils.h"
 
-namespace utils {
-EtcdURL split_etcd_url(std::string url) {
+EtcdURL SplitEtcdURL(const std::string& url) {
   EtcdURL result;
   result.url = url;
 
@@ -12,8 +11,7 @@ EtcdURL split_etcd_url(std::string url) {
   if (start_of_chain_prefix == std::string::npos) {
     result.chain_prefix = "/";
   } else {
-    result.chain_prefix =
-        url.substr(start_of_chain_prefix, std::string::npos);
+    result.chain_prefix = url.substr(start_of_chain_prefix, std::string::npos);
   }
   auto address = url.substr(0, start_of_chain_prefix);
   result.address = address;
@@ -24,5 +22,4 @@ EtcdURL split_etcd_url(std::string url) {
   result.host = host;
   result.port = std::stoi(port_str);
   return result;
-}
 }

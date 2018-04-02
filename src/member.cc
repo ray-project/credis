@@ -15,13 +15,13 @@ extern "C" {
 #include "redis/src/redismodule.h"
 }
 
+#include "etcd/etcd_master_client.h"
 #include "glog/logging.h"
 #include "leveldb/db.h"
 #include "leveldb/write_batch.h"
 #include "master_client.h"
-#include "timer.h"
 #include "redis_master_client.h"
-#include "etcd/etcd_master_client.h"
+#include "timer.h"
 #include "utils.h"
 
 Timer timer;
@@ -47,14 +47,13 @@ long long int heartbeatIntervalSec = 3;
 
 struct HeartbeatInfo {
   int64_t lease_id;
-  utils::EtcdURL etcd_url;
+  EtcdURL etcd_url;
   std::shared_ptr<grpc::Channel> channel;
   std::chrono::time_point<Clock, Ms> last_beat;
 } hb_info;
 
 // This is an instance of aeTimeProc.
-int heartbeat(aeEventLoop* loop, long long id, void *hb_info_ptr) {
-
+int heartbeat(aeEventLoop* loop, long long id, void* hb_info_ptr) {
   auto current_hb = ((HeartbeatInfo*) hb_info_ptr);
 
   // Ensure that at least 1/2 of the heartbeat interval has really elapsed
@@ -73,10 +72,10 @@ int heartbeat(aeEventLoop* loop, long long id, void *hb_info_ptr) {
   req.set_id(current_hb->lease_id);
   etcd3::pb::LeaseKeepAliveResponse res;
   auto status = etcd.LeaseKeepAlive(req, &res);
-  CHECK(status.ok())
-  << "Failed to KeepAlive lease " << current_hb->lease_id << ". "
-  << "GRPC error " << status.error_code() << ": "
-  << status.error_message();
+  CHECK(status.ok()) << "Failed to KeepAlive lease " << current_hb->lease_id
+                     << ". "
+                     << "GRPC error " << status.error_code() << ": "
+                     << status.error_message();
 
   return 0;
 }
@@ -203,7 +202,7 @@ class RedisChainModule {
         master_mode_(MasterMode::kRedis),
         parent_(NULL),
         child_(NULL) {
-    switch(master_mode_) {
+    switch (master_mode_) {
     case MasterMode::kRedis:
       master_client_ = std::unique_ptr<MasterClient>(new RedisMasterClient());
       break;
@@ -304,12 +303,12 @@ class RedisChainModule {
   void CleanUpSnToKeyLessThan(int64_t sn);
 
   // Start heartbeat in etcd.
-  grpc::Status StartHeartbeat(utils::EtcdURL url,
+  grpc::Status StartHeartbeat(EtcdURL url,
                               std::string own_addr,
                               int own_port,
                               aeEventLoop* el) {
-    auto channel = grpc::CreateChannel(url.address,
-                                       grpc::InsecureChannelCredentials());
+    auto channel =
+        grpc::CreateChannel(url.address, grpc::InsecureChannelCredentials());
     etcd3::Client etcd(channel);
 
     // Establish heartbeat.
@@ -648,8 +647,8 @@ int Put(RedisModuleCtx* ctx,
 
 // Resend all unacked updates.
 int MemberResendUnacked_RedisCommand(RedisModuleCtx* ctx,
-                             RedisModuleString** argv,
-                             int argc) {
+                                     RedisModuleString** argv,
+                                     int argc) {
   if (argc != 1) return RedisModule_WrongArity(ctx);
   auto& sn_to_key = module.sn_to_key();
   for (auto sn : module.sent()) {
@@ -786,7 +785,7 @@ int MemberConnectToMaster_RedisCommand(RedisModuleCtx* ctx,
 
     Status s = module.ConnectToMaster(master_url);
 
-    auto url = utils::split_etcd_url(master_url);
+    auto url = SplitEtcdURL(master_url);
     std::string own_addr = "127.0.0.1";
     char* bind_addr = getBindAddr();
     if (bind_addr != NULL) {
@@ -1245,9 +1244,7 @@ int RedisModule_OnLoad(RedisModuleCtx* ctx,
   default:
     return REDISMODULE_ERR;
   }
-  RedisModule_Log(ctx,
-                  "notice",
-                  "GCS mode: %s",
+  RedisModule_Log(ctx, "notice", "GCS mode: %s",
                   module.GcsModeString().c_str());
 
   long long master_mode = 0;
@@ -1256,18 +1253,16 @@ int RedisModule_OnLoad(RedisModuleCtx* ctx,
              RedisModule_StringToLongLong(argv[1], &master_mode));
   }
   switch (master_mode) {
-    case 0:
-      module.SetMasterMode(RedisChainModule::MasterMode::kRedis);
-      break;
-    case 1:
-      module.SetMasterMode(RedisChainModule::MasterMode::kEtcd);
-      break;
-    default:
-      return REDISMODULE_ERR;
+  case 0:
+    module.SetMasterMode(RedisChainModule::MasterMode::kRedis);
+    break;
+  case 1:
+    module.SetMasterMode(RedisChainModule::MasterMode::kEtcd);
+    break;
+  default:
+    return REDISMODULE_ERR;
   }
-  RedisModule_Log(ctx,
-                  "notice",
-                  "Master mode: %s",
+  RedisModule_Log(ctx, "notice", "Master mode: %s",
                   module.MasterModeString().c_str());
 
   // Register all commands.
@@ -1364,8 +1359,7 @@ int RedisModule_OnLoad(RedisModuleCtx* ctx,
   }
 
   if (RedisModule_CreateCommand(ctx, "MEMBER.RESEND_UNACKED",
-                                MemberResendUnacked_RedisCommand,
-                                "write",
+                                MemberResendUnacked_RedisCommand, "write",
                                 /*firstkey=*/-1, /*lastkey=*/-1,
                                 /*keystep=*/0) == REDISMODULE_ERR) {
     return REDISMODULE_ERR;

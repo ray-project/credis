@@ -16,4 +16,4 @@ class RedisMasterClient : public MasterClient {
   std::unique_ptr<redisContext> redis_context_;
 };
 
-#endif //CREDIS_REDIS_MASTER_CLIENT_H
+#endif  // CREDIS_REDIS_MASTER_CLIENT_H

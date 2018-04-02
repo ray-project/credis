@@ -3,7 +3,6 @@
 
 #include "grpcpp/grpcpp.h"
 class HeartbeatMonitor {
-
  public:
   HeartbeatMonitor(std::shared_ptr<grpc::Channel> channel, int redis_port);
 
@@ -16,4 +15,4 @@ class HeartbeatMonitor {
   int redis_port_;
 };
 
-#endif //CREDIS_HEARTBEATMONITOR_H
+#endif  // CREDIS_HEARTBEATMONITOR_H

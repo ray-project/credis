@@ -1,9 +1,9 @@
-#include "src/master_client.h"
-#include "glog/logging.h"
-#include "src/utils.h"
-#include "etcd3/include/etcd3.h"
 #include "etcd_master_client.h"
+#include "etcd3/include/etcd3.h"
 #include "etcd_utils.h"
+#include "glog/logging.h"
+#include "src/master_client.h"
+#include "src/utils.h"
 
 using Watermark = MasterClient::Watermark;
 
@@ -16,9 +16,9 @@ const char* EtcdMasterClient::WatermarkKey(Watermark w) const {
 }
 
 Status EtcdMasterClient::Connect(const std::string& url_str) {
-  url_ = utils::split_etcd_url(url_str);
-  channel_ = grpc::CreateChannel(url_.address,
-                                 grpc::InsecureChannelCredentials());
+  url_ = SplitEtcdURL(url_str);
+  channel_ =
+      grpc::CreateChannel(url_.address, grpc::InsecureChannelCredentials());
 
   // Register heartbeat.
   return Status::OK();
@@ -34,17 +34,17 @@ Status EtcdMasterClient::GetWatermark(Watermark w, int64_t* val) const {
 
   if (res.kvs_size() > 0) {
     auto kvs = res.kvs();
-    const etcd3::pb::KeyValue &result = kvs.Get(0);
+    const etcd3::pb::KeyValue& result = kvs.Get(0);
     *val = std::stol(result.value());
     return Status::OK();
   } else {
     switch (w) {
-      case Watermark::kSnCkpt:
-        *val = kSnCkptInit;
-        break;
-      case Watermark::kSnFlushed:
-        *val = kSnFlushedInit;
-        break;
+    case Watermark::kSnCkpt:
+      *val = kSnCkptInit;
+      break;
+    case Watermark::kSnFlushed:
+      *val = kSnFlushedInit;
+      break;
     }
     return Status::OK();
   }

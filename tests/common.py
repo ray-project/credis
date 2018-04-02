@@ -57,8 +57,7 @@ def KillNode(index=None, port=None, stateless=False, notify=None):
     else:
         port_to_kill = port
     log('killing port %d' % port_to_kill)
-    subprocess.check_output(
-        ["pkill", "-9", "redis-server.*:%s" % port_to_kill])
+    subprocess.call(["pkill", "-9", "redis-server.*:%s" % port_to_kill])
     if not stateless:
         if port is None:
             del PORTS[index + 1]

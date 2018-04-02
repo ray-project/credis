@@ -1,15 +1,15 @@
-#include <memory>
 #include <leveldb/include/leveldb/status.h>
+#include <memory>
 
-#include "glog/logging.h"
 #include "etcd3/include/etcd3.h"
+#include "glog/logging.h"
 #include "grpcpp/grpcpp.h"
 
 #include "redis/deps/hiredis/hiredis.h"
 
 #include "heartbeat_monitor.h"
-#include "src/utils.h"
 #include "src/etcd/etcd_utils.h"
+#include "src/utils.h"
 
 using etcd3::pb::RangeRequest;
 using etcd3::pb::RangeResponse;
@@ -20,10 +20,9 @@ using etcd3::util::RangePrefix;
 
 HeartbeatMonitor::HeartbeatMonitor(std::shared_ptr<grpc::Channel> channel,
                                    int redis_port)
-    :channel_(channel), redis_port_(redis_port) {}
+    : channel_(channel), redis_port_(redis_port) {}
 
 grpc::Status HeartbeatMonitor::Monitor(std::string chain_id) {
-
   etcd3::Client etcd(channel_);
   redisContext* redis_ctx = SyncConnect("127.0.0.1", redis_port_);
   CHECK(!redis_ctx->err) << "Heartbeat monitor couldn't connect to the master.";
@@ -46,8 +45,8 @@ grpc::Status HeartbeatMonitor::Monitor(std::string chain_id) {
         CHECK(redisReconnect(redis_ctx) == REDIS_OK);
         redisReply* reply = reinterpret_cast<redisReply*>(redisCommand(
             redis_ctx, "MASTER.REMOVE %s %s", host.c_str(), port.c_str()));
-        CHECK (reply != NULL)
-        << "reply is NULL, IO error: " << std::string(redis_ctx->errstr);
+        CHECK(reply != NULL)
+            << "reply is NULL, IO error: " << std::string(redis_ctx->errstr);
         freeReplyObject(reply);
       }
     }

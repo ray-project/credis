@@ -342,6 +342,27 @@ int MasterGetChain_RedisCommand(RedisModuleCtx* ctx,
   return REDISMODULE_OK;
 }
 
+int MasterTest_RedisCommand(RedisModuleCtx* ctx,
+                            RedisModuleString** argv,
+                            int argc) {
+  if (argc != 1) {
+    return RedisModule_WrongArity(ctx);
+  }
+  LOG(INFO) << "MasterTest";
+
+  // A libmember.so command.
+  RedisModuleCallReply* reply = RedisModule_Call(ctx, "MEMBER.SN", "");
+
+  CHECK(RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_INTEGER)
+      << "reply type: " << RedisModule_CallReplyType(reply);
+  LOG(INFO) << "MEMBER.SN reply: " << RedisModule_CallReplyInteger(reply);
+  return RedisModule_ReplyWithLongLong(ctx,
+                                       RedisModule_CallReplyInteger(reply));
+
+  // CHECK(RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_ERROR);
+  // return RedisModule_ReplyWithCallReply(ctx, reply);
+}
+
 extern "C" {
 
 int RedisModule_OnLoad(RedisModuleCtx* ctx,
@@ -380,6 +401,12 @@ int RedisModule_OnLoad(RedisModuleCtx* ctx,
   }
   if (RedisModule_CreateCommand(ctx, "MASTER.GET_CHAIN",
                                 MasterGetChain_RedisCommand, "readonly",
+                                /*firstkey=*/-1, /*lastkey=*/-1,
+                                /*keystep=*/0) == REDISMODULE_ERR) {
+    return REDISMODULE_ERR;
+  }
+  if (RedisModule_CreateCommand(ctx, "MASTER.TEST", MasterTest_RedisCommand,
+                                "readonly",
                                 /*firstkey=*/-1, /*lastkey=*/-1,
                                 /*keystep=*/0) == REDISMODULE_ERR) {
     return REDISMODULE_ERR;

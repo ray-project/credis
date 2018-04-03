@@ -32,7 +32,13 @@ aeEventLoop* getEventLoop();
 // TODO(zongheng): whenever we are about to do redisAsyncCommand(remote, ...),
 // we should test for remote->err first.  See the NOTE in Put().
 
+// Global definition.  A redis-server binary that loads libmember will have
+// access to this chain module.  E.g., dlopen(path,RTLD_LAZY|RTLD_GLOBAL).
 RedisChainModule module;
+
+int chain_module_int = 1;
+
+namespace {
 
 int DoFlush(RedisModuleCtx* ctx,
             int64_t sn_left,
@@ -249,6 +255,8 @@ int Put(RedisModuleCtx* ctx,
   // RedisModule_ReplyWithLongLong(ctx,sn);
   return REDISMODULE_OK;
 }
+
+}  // namespace
 
 // Set the role, successor and predecessor of this server.
 // Each of the arguments can be the empty string, in which case it is not set.

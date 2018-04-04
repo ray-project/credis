@@ -1,4 +1,3 @@
-
 #ifndef CREDIS_UTILS_H
 #define CREDIS_UTILS_H
 

@@ -1,7 +1,7 @@
 include_directories(${CMAKE_SOURCE_DIR})
 include_directories(${CMAKE_SOURCE_DIR}/redis/src/)
 include_directories(${CMAKE_SOURCE_DIR}/redis/deps/)
-include_directories(${CMAKE_SOURCE_DIR}/nlohmann/single_include/)
+include_directories(${CMAKE_SOURCE_DIR}/nlohmann-json/nlohmann/single_include/)
 
 find_package(glog 0.3.5 REQUIRED)
 find_package(LevelDB REQUIRED)

@@ -1,5 +1,5 @@
 #include "etcd_master_client.h"
-#include "etcd3/include/etcd3.h"
+#include "etcd3-cpp/include/etcd3.h"
 #include "etcd_utils.h"
 #include "glog/logging.h"
 #include "src/master_client.h"

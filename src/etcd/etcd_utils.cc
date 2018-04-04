@@ -1,7 +1,6 @@
-
 #include "etcd_utils.h"
 #include <string>
-#include "etcd3/include/etcd3.h"
+#include "etcd3-cpp/include/etcd3.h"
 
 EtcdURL SplitEtcdURL(const std::string& url) {
   EtcdURL result;

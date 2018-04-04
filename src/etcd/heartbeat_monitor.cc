@@ -1,7 +1,7 @@
 #include <leveldb/include/leveldb/status.h>
 #include <memory>
 
-#include "etcd3/include/etcd3.h"
+#include "etcd3-cpp/include/etcd3.h"
 #include "glog/logging.h"
 #include "grpcpp/grpcpp.h"
 
@@ -30,9 +30,7 @@ grpc::Status HeartbeatMonitor::Monitor(std::string chain_id) {
   auto wcr = new etcd3::pb::WatchCreateRequest();
   wcr->set_key(chain_id + "/heartbeat");
   wcr->set_range_end(RangePrefix(wcr->key()));
-  WatchRequest req;
-  req.set_allocated_create_request(wcr);
-  auto changes = etcd.MakeWatchStream(req);
+  auto changes = etcd.MakeWatchStream(wcr);
 
   etcd3::pb::WatchResponse response;
   while (changes->Read(&response)) {

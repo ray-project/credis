@@ -10,9 +10,9 @@
 [submodule "grpc"]
 	path = grpc
 	url = https://github.com/grpc/grpc
-[submodule "etcd3-cpp"]
-	path = etcd3
-	url = https://github.com/graysonchao/etcd3-cpp
 [submodule "nlohmann"]
 	path = nlohmann-json/nlohmann
 	url = https://github.com/nlohmann/json
+[submodule "etcd3-cpp"]
+	path = etcd3-cpp
+	url = https://github.com/graysonchao/etcd3-cpp

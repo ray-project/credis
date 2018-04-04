@@ -13,22 +13,22 @@ cd redis
 env USE_TCMALLOC=yes make -j
 cd ..
 
-cd glog 
-cmake . 
-make -j install 
+cd glog
+cmake .
+make -j install
 cd ..
 
-cd leveldb 
-make -j 
+cd leveldb
+make -j
 cd ..
 
 # Install grpc. A suitable version is included as a submodule of etcd3 but you
 # can install the latest version separately on the system too.
 cd etcd3
 git submodule update --init
-cd grpc 
-git submodule update --init 
-make 
+cd grpc
+git submodule update --init
+make
 make install
 cd third_party/protobuf
 make install

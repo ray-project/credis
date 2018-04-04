@@ -1,34 +1,34 @@
-find_package(Protobuf REQUIRED)
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/etcd3-cpp/cmake/Modules)
 
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/etcd3/cmake/Modules)
+find_package(Protobuf REQUIRED)
 find_package(GRPC REQUIRED)
 
 set(PB_SOURCES
-        ${CMAKE_SOURCE_DIR}/etcd3/proto-src/auth.pb.cc
-        ${CMAKE_SOURCE_DIR}/etcd3/proto-src/kv.pb.cc
-        ${CMAKE_SOURCE_DIR}/etcd3/proto-src/rpc.pb.cc
-        ${CMAKE_SOURCE_DIR}/etcd3/proto-src/v3lock.pb.cc
-        ${CMAKE_SOURCE_DIR}/etcd3/proto-src/auth.grpc.pb.cc
-        ${CMAKE_SOURCE_DIR}/etcd3/proto-src/kv.grpc.pb.cc
-        ${CMAKE_SOURCE_DIR}/etcd3/proto-src/rpc.grpc.pb.cc
-        ${CMAKE_SOURCE_DIR}/etcd3/proto-src/v3lock.grpc.pb.cc
+        ${CMAKE_SOURCE_DIR}/etcd3-cpp/proto-src/auth.pb.cc
+        ${CMAKE_SOURCE_DIR}/etcd3-cpp/proto-src/kv.pb.cc
+        ${CMAKE_SOURCE_DIR}/etcd3-cpp/proto-src/rpc.pb.cc
+        ${CMAKE_SOURCE_DIR}/etcd3-cpp/proto-src/v3lock.pb.cc
+        ${CMAKE_SOURCE_DIR}/etcd3-cpp/proto-src/auth.grpc.pb.cc
+        ${CMAKE_SOURCE_DIR}/etcd3-cpp/proto-src/kv.grpc.pb.cc
+        ${CMAKE_SOURCE_DIR}/etcd3-cpp/proto-src/rpc.grpc.pb.cc
+        ${CMAKE_SOURCE_DIR}/etcd3-cpp/proto-src/v3lock.grpc.pb.cc
 )
 
 set(PB_HEADERS
-        ${CMAKE_SOURCE_DIR}/etcd3/proto-src/auth.pb.h
-        ${CMAKE_SOURCE_DIR}/etcd3/proto-src/kv.pb.h
-        ${CMAKE_SOURCE_DIR}/etcd3/proto-src/rpc.pb.h
-        ${CMAKE_SOURCE_DIR}/etcd3/proto-src/v3lock.pb.h
-        ${CMAKE_SOURCE_DIR}/etcd3/proto-src/auth.grpc.pb.h
-        ${CMAKE_SOURCE_DIR}/etcd3/proto-src/kv.grpc.pb.h
-        ${CMAKE_SOURCE_DIR}/etcd3/proto-src/rpc.grpc.pb.h
-        ${CMAKE_SOURCE_DIR}/etcd3/proto-src/v3lock.grpc.pb.h
+        ${CMAKE_SOURCE_DIR}/etcd3-cpp/proto-src/auth.pb.h
+        ${CMAKE_SOURCE_DIR}/etcd3-cpp/proto-src/kv.pb.h
+        ${CMAKE_SOURCE_DIR}/etcd3-cpp/proto-src/rpc.pb.h
+        ${CMAKE_SOURCE_DIR}/etcd3-cpp/proto-src/v3lock.pb.h
+        ${CMAKE_SOURCE_DIR}/etcd3-cpp/proto-src/auth.grpc.pb.h
+        ${CMAKE_SOURCE_DIR}/etcd3-cpp/proto-src/kv.grpc.pb.h
+        ${CMAKE_SOURCE_DIR}/etcd3-cpp/proto-src/rpc.grpc.pb.h
+        ${CMAKE_SOURCE_DIR}/etcd3-cpp/proto-src/v3lock.grpc.pb.h
 )
 
 # etcd client
-include_directories(${CMAKE_SOURCE_DIR}/etcd3)
+include_directories(${CMAKE_SOURCE_DIR}/etcd3-cpp/)
 add_library(etcd3
-        ${CMAKE_SOURCE_DIR}/etcd3/src/etcd3.cc
+        ${CMAKE_SOURCE_DIR}/etcd3-cpp/src/etcd3.cc
         ${PB_SOURCES}
 )
 
@@ -47,7 +47,6 @@ add_library(etcd_master SHARED
         heartbeat_monitor.cc)
 target_compile_options(etcd_master PUBLIC ${REDIS_MODULE_CFLAGS} -fPIC)
 target_link_libraries(etcd_master ${REDIS_MODULE_LDFLAGS})
-target_link_libraries(etcd_master ${PROTOBUF_LIBRARIES})
 target_link_libraries(etcd_master ${LevelDB_LIBRARIES})
 target_link_libraries(etcd_master glog::glog)
 target_link_libraries(etcd_master etcd3)

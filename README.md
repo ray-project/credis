@@ -33,6 +33,11 @@ make install
 cd third_party/protobuf
 make install
 cd ../../../..
+
+# Build credis itself
+mkdir build; cd build
+cmake ..
+make -j
 ```
 
 ## etcd

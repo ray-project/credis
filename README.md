@@ -30,7 +30,9 @@ cd grpc
 git submodule update --init 
 make 
 make install
-cd ../..
+cd third_party/protobuf
+make install
+cd ../../../..
 ```
 
 ## etcd

@@ -304,14 +304,15 @@ int RedisChainModule::MutateHelper(RedisModuleCtx* ctx,
                                    NodeFunc node_func,
                                    TailFunc tail_func,
                                    int sn) {
+  // Node function.  Retrieve the mutated key.
   RedisModuleString* redis_key_str = nullptr;
   node_func(ctx, argv, argc, &redis_key_str);
   CHECK(redis_key_str != nullptr);
 
   // State maintenance.
   const std::string key_str = ReadString(redis_key_str);
-  LOG(INFO) << "Mutated key: " << key_str << "; size: " << key_str.size();
-  //
+  DLOG(INFO) << "Mutated key: " << key_str << "; size: " << key_str.size();
+
   // Update sn_to_key (for all execution modes; used for node addition codepath)
   // and optionally key_to_sn (when flushing is on).
   // NOTE(zongheng): this can be slow, see the note in class declaration.
@@ -324,74 +325,6 @@ int RedisChainModule::MutateHelper(RedisModuleCtx* ctx,
   if (ActAsTail()) {
     tail_func(ctx, argv, argc);
   }
-
-  // const std::string seqnum_str = std::to_string(sn);
-
-  // // Protocol.
-  // if (ActAsTail()) {
-  //   // LOG(INFO) << "sn_string published " << sn_string;
-  //   //    RedisModuleCallReply* reply =
-  //   //        RedisModule_Call(ctx, "PUBLISH", "sc", client_id,
-  //   //        sn_string.c_str());
-  //   //    if (RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_ERROR) {
-  //   //      return RedisModule_ReplyWithCallReply(ctx, reply);
-  //   //    }
-
-  //   RedisModuleString* s =
-  //       RedisModule_CreateString(ctx, seqnum_str.data(), seqnum_str.size());
-  //   RedisModule_Publish(client_id, s);
-  //   RedisModule_FreeString(ctx, s);
-
-  //   if (parent()) {
-  //     RedisModuleCallReply* reply =
-  //         RedisModule_Call(ctx, "MEMBER.ACK", "c", seqnum_str.c_str());
-  //     if (RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_ERROR) {
-  //       return RedisModule_ReplyWithCallReply(ctx, reply);
-  //     }
-  //   }
-  // } else {
-  //   // NOTE: here we do redisAsyncCommand(child, ...).  However, if the child
-  //   // crashed before the call, this function non-deterministically crashes
-  //   // with, say, a single digit percent chance.  We guard against this by
-  //   // testing the "err" field first.
-  //   // LOG_EVERY_N(INFO, 999999999) << "Calling
-  //   MemberPropagate_RedisCommand"; if (!child()->err) {
-  //     // Zero-copy.
-  //     size_t key_len = 0;
-  //     const char* key_ptr = ReadString(name, &key_len);
-  //     size_t val_len = 0;
-  //     const char* val_ptr = ReadString(data, &val_len);
-  //     size_t cid_len = 0;
-  //     const char* cid_ptr = ReadString(client_id, &cid_len);
-
-  //     const int status = redisAsyncCommand(
-  //         child(), NULL, NULL, "MEMBER.PROPAGATE %b %b %b %b",
-  //         key_ptr, key_len, val_ptr, val_len, seqnum_str.data(),
-  //         seqnum_str.size(), cid_ptr, cid_len);
-  //     // TODO(zongheng): check status.
-  //     // LOG_EVERY_N(INFO, 999999999) << "Done";
-  //     sent().insert(sn);
-  //   } else {
-  //     // TODO(zongheng): this case is incompletely handled, i.e. "failure of
-  //     a
-  //     // middle server".  To handle this the Sent list data structure needs
-  //     to
-  //     // be extended to include an executable representation of the sent
-  //     // commands.
-  //     // LOG_EVERY_N(INFO, 999999999)
-  //     //     << "Child dead, waiting for master to intervene.";
-  //     // LOG_EVERY_N(INFO, 999999999)
-  //     //     << "Redis context error: '" <<
-  //     //     std::string(child()->errstr)
-  //     //     << "'.";
-  //     // TODO(zongheng): is it okay to reply SN to client in this case as
-  //     // well?
-  //   }
-  // }
-  // // TODO: is this needed?!
-  // // Return the sequence number
-  // // if (!ActAsHead()) {RedisModule_ReplyWithNull(ctx);}
-  // // RedisModule_ReplyWithLongLong(ctx,sn);
   return REDISMODULE_OK;
 }
 
@@ -400,11 +333,17 @@ int RedisChainModule::Mutate(RedisModuleCtx* ctx,
                              int argc,
                              NodeFunc node_func,
                              TailFunc tail_func) {
+  CHECK(Role() == RedisChainModule::ChainRole::kSingleton)
+      << "Mutate() API supports 1-node mode only for now due to insufficient "
+         "client-side handling";
   if (ActAsHead()) {
     if (!DropWrites()) {
       const long long sn = inc_sn();
+
+      // TODO(zongheng): think about either handling this, or have client supply
+      // a seqnum.
       // Return the sequence number.
-      RedisModule_ReplyWithLongLong(ctx, sn);
+      // RedisModule_ReplyWithLongLong(ctx, sn);
 
       return MutateHelper(ctx, argv, argc, node_func, tail_func, sn);
     } else {

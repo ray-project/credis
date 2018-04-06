@@ -1,12 +1,16 @@
+#include "chain_module.h"
+
 #include <assert.h>
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include <map>
 #include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
 extern "C" {
 #include "hiredis/adapters/ae.h"
 #include "hiredis/async.h"
@@ -14,12 +18,10 @@ extern "C" {
 #include "redis/src/ae.h"
 #include "redis/src/redismodule.h"
 }
-
 #include "glog/logging.h"
 #include "leveldb/db.h"
 #include "leveldb/write_batch.h"
 
-#include "chain_module.h"
 #include "timer.h"
 #include "utils.h"
 
@@ -32,11 +34,11 @@ aeEventLoop* getEventLoop();
 // TODO(zongheng): whenever we are about to do redisAsyncCommand(remote, ...),
 // we should test for remote->err first.  See the NOTE in Put().
 
-// Global definition.  A redis-server binary that loads libmember will have
-// access to this chain module.  E.g., dlopen(path,RTLD_LAZY|RTLD_GLOBAL).
+// Global definition.  A redis-server binary that --loadmodule <module built
+// from this file> will have access to the symbol/object, "module".  This must
+// be supported by a modified module.c in redis/src tree that uses
+// dlopen(path,RTLD_LAZY|RTLD_GLOBAL) to load modules.
 RedisChainModule module;
-
-int chain_module_int = 1;
 
 namespace {
 

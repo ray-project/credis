@@ -1,6 +1,18 @@
 #ifndef CREDIS_CHAIN_MODULE_H_
 #define CREDIS_CHAIN_MODULE_H_
 
+#include <functional>
+#include <map>
+#include <set>
+#include <unordered_map>
+
+extern "C" {
+#include "hiredis/async.h"
+#include "hiredis/hiredis.h"
+#include "redismodule.h"
+}
+#include "glog/logging.h"
+
 #include "master_client.h"
 #include "utils.h"
 

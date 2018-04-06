@@ -53,6 +53,7 @@ target_link_libraries(master ${REDIS_MODULE_LDFLAGS})
 target_link_libraries(master utils)
 target_link_libraries(master glog::glog)
 target_link_libraries(master ${LevelDB_LIBRARIES})
+target_link_libraries(master master_client)
 
 # member
 add_library(member SHARED member.cc)

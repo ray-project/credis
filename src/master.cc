@@ -1,3 +1,4 @@
+
 #include <assert.h>
 #include <ctype.h>
 #include <stdlib.h>
@@ -11,11 +12,28 @@ extern "C" {
 #include "hiredis/hiredis.h"
 #include "redismodule.h"
 }
-
 #include "glog/logging.h"
 #include "leveldb/db.h"
 
 #include "utils.h"
+
+// Global definition.  A redis-server binary that --loadmodule <module built
+// from this file> will have access to the symbol/object, "module".  This must
+// be supported by a modified module.c in redis/src tree that uses
+// dlopen(path,RTLD_LAZY|RTLD_GLOBAL) to load modules.
+//
+// We provide this definition -- but we don't use it in anyway -- as a hack with
+// the following rationale.  Suppose a user redis module wants to make use of
+// credis.  Since credis (currently) functions with a libmaster server and
+// several libmember servers, the most convenient way for that user is to have
+// one of her existing servers --loadmodule libmaster, and the rest of her
+// servers --loadmodule libmember.  The user may not wish to modify her code, so
+// her redis module code will contain a reference to "extern RedisChainModule
+// module", regardless of whether libmaster or libmember is supposed to be
+// linked in. Therefore, here at libmaster we must also define this symbol in
+// order for the user's loading to succeed.
+#include "chain_module.h"
+RedisChainModule module;  // Unused.
 
 struct Member {
   std::string address;

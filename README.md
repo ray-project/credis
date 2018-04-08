@@ -48,7 +48,7 @@ make -j
 
 ## etcd
 To make etcd-related tests pass and experiment with the etcd master, you
-need to have etcd running locally, listening on 127.0.0.1:12379.
+need to have etcd running locally. For tests, it must be listening on 127.0.0.1:12379.
 
 A really simple way to do this is to install Docker, and then:
 
@@ -157,4 +157,11 @@ However, you can also inform the master that a node died with MASTER.REMOVE:
 redis-cli -p 6369 MASTER.REMOVE 127.0.0.1 6370
 ```
 
+## Running tests
+You need Python3 (Python 2 support is coming soon), and the necessary Python libs:
+```
+$ pip3 install redis etcd3 numpy
+```
+
+To make etcd-related tests pass, etcd must be running on port 12379 (see above.)
 

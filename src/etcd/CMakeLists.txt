@@ -31,6 +31,7 @@ add_library(etcd3
         ${CMAKE_SOURCE_DIR}/etcd3-cpp/src/etcd3.cc
         ${PB_SOURCES}
 )
+target_compile_options(etcd3 PUBLIC ${REDIS_MODULE_CFLAGS} -fPIC)
 
 target_link_libraries(etcd3 gRPC::grpc++)
 set_source_files_properties(

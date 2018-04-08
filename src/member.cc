@@ -152,7 +152,7 @@ class RedisChainModule {
            chain_role_ == ChainRole::kTail;
   }
 
-  GcsMode GcsMode() const {
+  GcsMode GetGcsMode() const {
     CHECK(gcs_mode_initialized_);
     return gcs_mode_;
   }
@@ -175,7 +175,7 @@ class RedisChainModule {
     }
   }
 
-  MasterMode MasterMode() const {
+  MasterMode GetMasterMode() const {
     CHECK(master_mode_initialized_);
     return master_mode_;
   }
@@ -419,7 +419,7 @@ int DoFlush(RedisModuleCtx* ctx,
             int64_t sn_right,
             int64_t sn_ckpt,
             const std::vector<std::string>& flushable_keys) {
-  CHECK(module.GcsMode() == RedisChainModule::GcsMode::kCkptFlush);
+  CHECK(module.GetGcsMode() == RedisChainModule::GcsMode::kCkptFlush);
 
   const int64_t old = module.key_to_sn().size();
 
@@ -570,7 +570,7 @@ int Put(RedisModuleCtx* ctx,
     const std::string key_str(ReadString(name));
     // NOTE(zongheng): this can be slow, see the note in class declaration.
     module.sn_to_key()[sn] = key_str;
-    if (module.GcsMode() == RedisChainModule::GcsMode::kCkptFlush) {
+    if (module.GetGcsMode() == RedisChainModule::GcsMode::kCkptFlush) {
       module.key_to_sn()[key_str] = sn;
     }
     module.record_sn(static_cast<int64_t>(sn));
@@ -776,7 +776,7 @@ int MemberConnectToMaster_RedisCommand(RedisModuleCtx* ctx,
 
   std::string master_url = ReadString(argv[1]);
 
-  if (module.MasterMode() == RedisChainModule::MasterMode::kEtcd) {
+  if (module.GetMasterMode() == RedisChainModule::MasterMode::kEtcd) {
     // Optional arguments for setting the heartbeat interval and timeout.
     if (argc >= 4) {
       RedisModule_StringToLongLong(argv[2], &heartbeatIntervalSec);
@@ -1003,7 +1003,7 @@ int TailCheckpoint_RedisCommand(RedisModuleCtx* ctx,
     return RedisModule_ReplyWithError(
         ctx, "ERR this command must be called on the tail.");
   }
-  if (module.GcsMode() == RedisChainModule::GcsMode::kNormal) {
+  if (module.GetGcsMode() == RedisChainModule::GcsMode::kNormal) {
     return RedisModule_ReplyWithError(
         ctx, "ERR redis server's GcsMode is set to kNormal.");
   }
@@ -1081,7 +1081,7 @@ int HeadFlush_RedisCommand(RedisModuleCtx* ctx,
     return RedisModule_ReplyWithError(
         ctx, "ERR this command must be called on the head.");
   }
-  if (module.GcsMode() != RedisChainModule::GcsMode::kCkptFlush) {
+  if (module.GetGcsMode() != RedisChainModule::GcsMode::kCkptFlush) {
     return RedisModule_ReplyWithError(
         ctx, "ERR redis server's GcsMode is NOT set to kCkptFlush.");
   }

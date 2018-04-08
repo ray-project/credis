@@ -30,8 +30,6 @@ aeEventLoop* getEventLoop();
 int getPort();
 }
 
-char UNIX_SOCKET_DIR[] = "/tmp/credis-XXXXXX";
-
 struct Member {
   std::string address;
   std::string port;

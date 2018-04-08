@@ -34,6 +34,7 @@ add_library(etcd3
 target_compile_options(etcd3 PUBLIC ${REDIS_MODULE_CFLAGS} -fPIC)
 
 target_link_libraries(etcd3 gRPC::grpc++)
+target_link_libraries(etcd3 ${PROTOBUF_LIBRARIES})
 set_source_files_properties(
         ${PB_SOURCES} ${PB_HEADERS}
         PROPERTIES

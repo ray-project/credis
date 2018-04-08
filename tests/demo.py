@@ -13,8 +13,8 @@ import uuid
 import numpy as np
 
 import redis
-from tests import common
-from tests.common import *
+import common
+from common import *
 
 ack_client = AckClient()
 master_client = MasterClient()
@@ -319,6 +319,8 @@ def test_etcd_heartbeat_timeout(startcredis_etcdonly):
     driver.join()
 
     assert ops_completed.value == n
+
+    import pdb; pdb.set_trace()
     chain = master_client.execute_command('MASTER.GET_CHAIN')
     assert len(chain) == 2 - 1 + 1, 'chain %s' % chain
     Check(ops_completed.value)

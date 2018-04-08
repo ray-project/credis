@@ -2,6 +2,12 @@
 
 ## Building
 
+First, ensure that the target system has the necessary build tooling. On Ubuntu, this can be achieved with:
+```
+$ sudo apt install build-essential autogen autoconf libtool cmake tcl shtool
+```
+
+Now, build third-party dependencies and credis itself:
 ```
 git submodule init
 git submodule update
@@ -15,6 +21,7 @@ cd ..
 
 cd glog
 cmake .
+make
 make -j install
 cd ..
 
@@ -22,15 +29,14 @@ cd leveldb
 make -j
 cd ..
 
-# Install grpc. A suitable version is included as a submodule of etcd3 but you
-# can install the latest version separately on the system too.
-cd etcd3
+cd etcd3-cpp
 git submodule update --init
 cd grpc
 git submodule update --init
 make
 make install
 cd third_party/protobuf
+# it's okay if there's nothing to do for target install, that means grpc's Makefile already installed it
 make install
 cd ../../../..
 

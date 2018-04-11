@@ -249,11 +249,11 @@ class RedisChainModule {
 
   // Runs "node_func" on every node in the chain; after the tail node has run it
   // too, finalizes the mutation by running "tail_func".
-  int Mutate(RedisModuleCtx* ctx,
-             RedisModuleString** argv,
-             int argc,
-             NodeFunc node_func,
-             TailFunc tail_func);
+  int ChainReplicate(RedisModuleCtx* ctx,
+                     RedisModuleString** argv,
+                     int argc,
+                     NodeFunc node_func,
+                     TailFunc tail_func);
 
  private:
   std::string prev_address_;
@@ -340,13 +340,14 @@ int RedisChainModule::MutateHelper(RedisModuleCtx* ctx,
   return REDISMODULE_OK;
 }
 
-int RedisChainModule::Mutate(RedisModuleCtx* ctx,
-                             RedisModuleString** argv,
-                             int argc,
-                             NodeFunc node_func,
-                             TailFunc tail_func) {
+int RedisChainModule::ChainReplicate(RedisModuleCtx* ctx,
+                                     RedisModuleString** argv,
+                                     int argc,
+                                     NodeFunc node_func,
+                                     TailFunc tail_func) {
   CHECK(Role() == RedisChainModule::ChainRole::kSingleton)
-      << "Mutate() API supports 1-node mode only for now due to insufficient "
+      << "ChainReplicate() API supports 1-node mode only for now due to "
+         "insufficient "
          "client-side handling";
   if (ActAsHead()) {
     if (!DropWrites()) {
@@ -365,12 +366,6 @@ int RedisChainModule::Mutate(RedisModuleCtx* ctx,
   } else {
     return RedisModule_ReplyWithError(ctx, "ERR called PUT on non-head node");
   }
-
-  // LOG(INFO) << "Running chain module Mutate()'s node_func";
-  // const int status = node_func(ctx, argv, argc);
-  // if (status) return status;
-  // LOG(INFO) << "Running chain module Mutate()'s tail_func";
-  // return tail_func(ctx, argv, argc);
 }
 
 void RedisChainModule::CleanUpSnToKeyLessThan(int64_t sn) {

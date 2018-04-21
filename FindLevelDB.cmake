@@ -12,15 +12,25 @@
 
 set(LEVELDB_ROOT "${CMAKE_SOURCE_DIR}/leveldb")
 
+message(STATUS ${LEVELDB_ROOT})
+
+# NOTES:
+# - Use NO_DEFAULT_PATH to force/hint at both to pick up the leveldb that gets
+#   included and built under credis.
+# - Prefer to use leveldb's shared lib.  Its static lib seems to not have been
+#   compiled with -fPIC, and thus errors occur during our credis linking.
+
 # Look for the header file.
 find_path(LevelDB_INCLUDE NAMES leveldb/db.h
-                          PATHS ${LEVELDB_ROOT}/include /opt/local/include /usr/local/include /usr/include
-                          DOC "Path in which the file leveldb/db.h is located." )
+                          PATHS ${LEVELDB_ROOT}/include #/opt/local/include /usr/local/include /usr/include
+                          DOC "Path in which the file leveldb/db.h is located."
+                          NO_DEFAULT_PATH)
 
 # Look for the library.
 find_library(LevelDB_LIBRARY NAMES leveldb
-                             PATHS ${LEVELDB_ROOT}/out-static ${LEVELDB_ROOT}/out-shared /usr/local/lib /usr/lib
-                             DOC "Path to leveldb library." )
+                             PATHS ${LEVELDB_ROOT}/out-shared ${LEVELDB_ROOT}/out-static /usr/local/lib /usr/lib
+                             DOC "Path to leveldb library."
+                             NO_DEFAULT_PATH)
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(LevelDB DEFAULT_MSG LevelDB_INCLUDE LevelDB_LIBRARY)

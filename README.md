@@ -20,7 +20,7 @@ env USE_TCMALLOC=yes make -j
 cd ..
 
 cd glog
-cmake .
+cmake -DWITH_GFLAGS=OFF .
 make
 make -j install
 cd ..

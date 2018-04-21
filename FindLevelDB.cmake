@@ -22,7 +22,7 @@ message(STATUS ${LEVELDB_ROOT})
 
 # Look for the header file.
 find_path(LevelDB_INCLUDE NAMES leveldb/db.h
-                          PATHS ${LEVELDB_ROOT}/include #/opt/local/include /usr/local/include /usr/include
+                          PATHS ${LEVELDB_ROOT}/include /opt/local/include /usr/local/include /usr/include
                           DOC "Path in which the file leveldb/db.h is located."
                           NO_DEFAULT_PATH)
 

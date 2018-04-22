@@ -24,7 +24,7 @@ function setup() {
     port=6370
     while true; do
         result=$(pgrep -a redis-server | grep $port)
-        if [[ -z ${result} ]]; then
+        if [ -z "${result}" ]; then
             echo 'breaking...'
             break
         fi

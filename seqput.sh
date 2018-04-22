@@ -18,7 +18,7 @@ pkill -f redis_seqput_bench
 pkill -f credis_seqput_bench
 
 ssh -o StrictHostKeyChecking=no ubuntu@${SERVER} << EOF
-cd ~/credis-1
+cd ~/credis
 pkill -f redis-server
 sleep 2
 ./setup.sh $NUM_NODES
@@ -37,7 +37,8 @@ logs="${NUM_CLIENTS}clients-*-chain-${NUM_NODES}node-wr${WRITE_RATIO}.log"
 outfile="chain-${NUM_NODES}node-wr${WRITE_RATIO}"
 
 # Composite
-thput=$(grep throughput ${logs} | tr -s ' ' | cut -d' ' -f 11 | sort -n | tail -n1 | awk -v N=$NUM_CLIENTS '{time=$1/1000} END {print 50000*N/time}')
+num_ops=$(grep throughput ${logs} | tr -s ' ' | cut -d' ' -f 13 | tr -d ',' | sort -n | tail -n1)
+thput=$(grep throughput ${logs} | tr -s ' ' | cut -d' ' -f 11 | sort -n | tail -n1 | awk -v N=$NUM_CLIENTS -v O=$num_ops '{time=$1/1000} END {print O*N/time}')
 latency=$(grep latency ${logs} | tr -s ' ' | cut -d' ' -f 8 | awk  -v N=$NUM_CLIENTS '{s += $1} END {print s/N}')
 echo "$NUM_CLIENTS $thput $latency" >> ${outfile}.txt
 

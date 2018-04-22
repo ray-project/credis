@@ -1,13 +1,29 @@
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <random>
 #include <thread>
 #include <unordered_set>
 
+#include <unistd.h>
+
 #include "glog/logging.h"
 
 #include "client.h"
 #include "timer.h"
+
+std::string random_string(size_t length) {
+  auto randchar = []() -> char {
+    const char charset[] = "0123456789"
+                           "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                           "abcdefghijklmnopqrstuvwxyz";
+    const size_t max_index = (sizeof(charset) - 1);
+    return charset[rand() % max_index];
+  };
+  std::string str(length, 0);
+  std::generate_n(str.begin(), length, randchar);
+  return str;
+}
 
 // TODO(zongheng): timeout should be using exponential backoff and/or some
 // randomization; this is critical in distributed settings (e.g., multiple
@@ -20,9 +36,9 @@
 //
 // If "2" is omitted in the above, by default 1 server is used.
 
-const int N = 1000000;
-// const int N = 500000;
-aeEventLoop* loop = aeCreateEventLoop(64);
+// const int N = 1000000;
+const int N = 50000;
+aeEventLoop *loop = aeCreateEventLoop(64);
 int writes_completed = 0;
 int reads_completed = 0;
 Timer reads_timer, writes_timer;
@@ -31,12 +47,12 @@ std::string last_issued_read_key;
 std::default_random_engine re;
 double kWriteRatio = 1.0;
 
-const long long kRetryTimerMillisecs = 100;  // For ae's timer.
+const long long kRetryTimerMillisecs = 100; // For ae's timer.
 double last_unacked_timestamp = -1;
 int64_t last_unacked_seqnum = -1;
 
-redisAsyncContext* write_context = nullptr;
-redisAsyncContext* read_context = nullptr;
+redisAsyncContext *write_context = nullptr;
+redisAsyncContext *read_context = nullptr;
 
 // Client's bookkeeping for seqnums.
 std::unordered_set<int64_t> assigned_seqnums;
@@ -47,8 +63,8 @@ std::unordered_set<int64_t> acked_seqnums;
 const std::string client_id = std::to_string(getpid());
 
 // Forward declaration.
-void SeqPutCallback(redisAsyncContext*, void*, void*);
-void SeqGetCallback(redisAsyncContext*, void*, void*);
+void SeqPutCallback(redisAsyncContext *, void *, void *);
+void SeqGetCallback(redisAsyncContext *, void *, void *);
 void AsyncPut(bool);
 void AsyncGet();
 void AsyncNoReply();
@@ -66,9 +82,10 @@ void AsyncRandomCommand() {
   }
 }
 
-void OnCompleteLaunchNext(Timer* timer, int* cnt, int other_cnt) {
+void OnCompleteLaunchNext(Timer *timer, int *cnt, int other_cnt) {
   // Sometimes an ACK comes back late, just ignore if we're done.
-  if (*cnt + other_cnt >= N) return;
+  if (*cnt + other_cnt >= N)
+    return;
   ++(*cnt);
   timer->TimeOpEnd(*cnt);
   if (*cnt + other_cnt == N) {
@@ -81,10 +98,9 @@ void OnCompleteLaunchNext(Timer* timer, int* cnt, int other_cnt) {
 
 // This callback gets fired whenever the store assigns a seqnum for a Put
 // request.
-void SeqPutCallback(redisAsyncContext* write_context,  // != ack_context.
-                    void* r,
-                    void*) {
-  const redisReply* reply = reinterpret_cast<redisReply*>(r);
+void SeqPutCallback(redisAsyncContext *write_context, // != ack_context.
+                    void *r, void *) {
+  const redisReply *reply = reinterpret_cast<redisReply *>(r);
   const int64_t assigned_seqnum = reply->integer;
   // LOG(INFO) << "SeqPutCallback " << assigned_seqnum;
   auto it = acked_seqnums.find(assigned_seqnum);
@@ -101,19 +117,29 @@ void SeqPutCallback(redisAsyncContext* write_context,  // != ack_context.
 
 // Put(n -> n), for n == writes_completed.
 void AsyncPut(bool is_retry) {
+  // i -> i.
   const std::string data = std::to_string(writes_completed);
+
+  // Fixed-size keys and values.  Works with wr = 1 currently.
+  static const int kKeySize = 25;
+  static const int kValueSize = 100;
+  const std::string key = random_string(kKeySize);
+  const std::string value = random_string(kValueSize);
+
   // LOG(INFO) << "PUT " << data;
-  if (!is_retry) last_unacked_timestamp = writes_timer.TimeOpBegin();
+  if (!is_retry)
+    last_unacked_timestamp = writes_timer.TimeOpBegin();
   const int status = redisAsyncCommand(
       write_context, &SeqPutCallback,
-      /*privdata=*/NULL, "MEMBER.PUT %b %b %b", data.data(), data.size(),
-      data.data(), data.size(), client_id.data(), client_id.size());
+      /*privdata=*/NULL, "MEMBER.PUT %b %b %b", key.data(), key.size(),
+      value.data(), value.size(), client_id.data(), client_id.size());
+  // /*privdata=*/NULL, "MEMBER.PUT %b %b %b", data.data(), data.size(),
+  //   data.data(), data.size(), client_id.data(), client_id.size());
   CHECK(status == REDIS_OK);
 }
 
-void AsyncNoReplyCallback(redisAsyncContext* write_context,  // != ack_context.
-                          void* r,
-                          void*) {
+void AsyncNoReplyCallback(redisAsyncContext *write_context, // != ack_context.
+                          void *r, void *) {
   CHECK(0) << "Should never be called";
 }
 void AsyncNoReply() {
@@ -137,15 +163,14 @@ void AsyncGet() {
   reads_timer.TimeOpBegin();
   // LOG(INFO) << "GET " << query;
   const int status = redisAsyncCommand(
-      read_context, reinterpret_cast<redisCallbackFn*>(&SeqGetCallback),
+      read_context, reinterpret_cast<redisCallbackFn *>(&SeqGetCallback),
       /*privdata=*/NULL, "GET %b", query.data(), query.size());
   CHECK(status == REDIS_OK);
 }
 
-void SeqGetCallback(redisAsyncContext* /*context*/,
-                    void* r,
-                    void* /*privdata*/) {
-  const redisReply* reply = reinterpret_cast<redisReply*>(r);
+void SeqGetCallback(redisAsyncContext * /*context*/, void *r,
+                    void * /*privdata*/) {
+  const redisReply *reply = reinterpret_cast<redisReply *>(r);
   // LOG(INFO) << "reply type " << reply->type << "; issued get "
   //           << last_issued_read_key;
   const std::string actual = std::string(reply->str, reply->len);
@@ -155,9 +180,8 @@ void SeqGetCallback(redisAsyncContext* /*context*/,
 }
 
 // This gets fired whenever an ACK from the store comes back.
-void SeqPutAckCallback(redisAsyncContext* ack_context,  // != write_context.
-                       void* r,
-                       void* privdata) {
+void SeqPutAckCallback(redisAsyncContext *ack_context, // != write_context.
+                       void *r, void *privdata) {
   /* Replies to the SUBSCRIBE command have 3 elements. There are two
    * possibilities. Either the reply is the initial acknowledgment of the
    * subscribe command, or it is a message. If it is the initial acknowledgment,
@@ -170,8 +194,8 @@ void SeqPutAckCallback(redisAsyncContext* ack_context,  // != write_context.
    *     - reply->element[1]->str is the name of the channel
    *     - reply->emement[2]->str is the contents of the message.
    */
-  const redisReply* reply = reinterpret_cast<redisReply*>(r);
-  const redisReply* message_type = reply->element[0];
+  const redisReply *reply = reinterpret_cast<redisReply *>(r);
+  const redisReply *message_type = reply->element[0];
 
   if (reply == nullptr) {
     LOG(INFO) << "reply nullptr: " << ack_context->errstr;
@@ -202,8 +226,8 @@ void SeqPutAckCallback(redisAsyncContext* ack_context,  // != write_context.
 }
 
 // const double kRetryTimeoutMicrosecs = 500000;
-const double kRetryTimeoutMicrosecs = 5 * 1e6;  // 5 sec
-int RetryPutTimer(aeEventLoop* loop, long long /*timer_id*/, void*) {
+const double kRetryTimeoutMicrosecs = 5 * 1e6; // 5 sec
+int RetryPutTimer(aeEventLoop *loop, long long /*timer_id*/, void *) {
   const double now_us = writes_timer.NowMicrosecs();
   const double diff = now_us - last_unacked_timestamp;
   if (last_unacked_timestamp > 0 && diff > kRetryTimeoutMicrosecs) {
@@ -219,16 +243,19 @@ int RetryPutTimer(aeEventLoop* loop, long long /*timer_id*/, void*) {
     }
     AsyncPut(/*is_retry=*/true);
   }
-  return kRetryTimerMillisecs;  // Reset ae's timer to 0.
+  return kRetryTimerMillisecs; // Reset ae's timer to 0.
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
   // Parse.
   int num_chain_nodes = 1;
-  if (argc > 1) num_chain_nodes = std::stoi(argv[1]);
-  if (argc > 2) kWriteRatio = std::stod(argv[2]);
+  if (argc > 1)
+    num_chain_nodes = std::stoi(argv[1]);
+  if (argc > 2)
+    kWriteRatio = std::stod(argv[2]);
   std::string server = "127.0.0.1";
-  if (argc > 3) server = std::string(argv[3]);
+  if (argc > 3)
+    server = std::string(argv[3]);
   // Set up "write_port" and "ack_port".
   const int write_port = 6370;
   const int ack_port = write_port + num_chain_nodes - 1;
@@ -255,7 +282,7 @@ int main(int argc, char** argv) {
   // this client program is sequential.
   CHECK(client
             .RegisterAckCallback(
-                static_cast<redisCallbackFn*>(&SeqPutAckCallback))
+                static_cast<redisCallbackFn *>(&SeqPutAckCallback))
             .ok());
 
   write_context = client.write_context();
@@ -285,12 +312,18 @@ int main(int argc, char** argv) {
 
   // Timings related.
   Timer merged = Timer::Merge(reads_timer, writes_timer);
+  merged.DropFirst(10);
+
   double composite_mean = 0, composite_std = 0;
   merged.Stats(&composite_mean, &composite_std);
   double reads_mean = 0, reads_std = 0;
   reads_timer.Stats(&reads_mean, &reads_std);
   double writes_mean = 0, writes_std = 0;
   writes_timer.Stats(&writes_mean, &writes_std);
+
+  const std::string pathname =
+      "client-" + std::to_string(getpid()) + "-" + argv[1] + "nodes.csv";
+  merged.WriteToFile(pathname);
 
   LOG(INFO) << "throughput " << N * 1e6 / latency_us
             << " ops/s, total duration (ms) " << latency_us / 1e3 << ", num "
@@ -310,10 +343,7 @@ int main(int argc, char** argv) {
             << composite_std;
   LOG(INFO) << "reads_lat (us) mean " << reads_mean << " std " << reads_std;
   LOG(INFO) << "writes_lat (us) mean " << writes_mean << " std " << writes_std;
-  //   {
-  //     std::ofstream ofs("latency.txt");
-  //     for (double x : timer.latency_micros()) ofs << x << std::endl;
-  //   }
 
+  LOG(INFO) << "pid " << getpid();
   return 0;
 }

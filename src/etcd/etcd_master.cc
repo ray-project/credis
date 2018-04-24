@@ -71,6 +71,7 @@ int ReplyIfFailure(RedisModuleCtx* rm_ctx,
   } else if (reply->type == REDIS_REPLY_ERROR) {
     return RedisModule_ReplyWithError(rm_ctx, reply->str);
   }
+  return 0;
 }
 
 }  // anonymous namespace
@@ -112,7 +113,7 @@ grpc::Status WriteChain(const std::deque<Member>& chain) {
   etcd3::Client etcd(etcd_channel);
   etcd3::pb::PutRequest request;
   request.set_key(etcd_url.chain_prefix + "/members");
-  json j_members(members);
+  json j_members(chain);
   request.set_value(j_members.dump());
   etcd3::pb::PutResponse response;
   return etcd.Put(request, &response);
@@ -366,7 +367,6 @@ int MasterRefreshHead_RedisCommand(RedisModuleCtx* ctx,
   int head_index = 0;
   Member head = members.front();
   // (1).
-  size_t size = members.size();
   while (redisReconnect(head.context) != REDIS_OK) {
     members.pop_front();
     head = members[head_index];
@@ -408,7 +408,6 @@ int MasterRefreshTail_RedisCommand(RedisModuleCtx* ctx,
   int head_index = 0;
   Member tail = members.back();
   // (1).
-  size_t size = members.size();
   while (redisReconnect(tail.context) != REDIS_OK) {
     members.pop_back();
     tail = members[head_index];

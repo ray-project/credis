@@ -26,7 +26,10 @@ else()
   set(REDIS_MODULE_LDFLAGS -shared)
 endif()
 
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/etcd)
+
+if (CREDIS_USE_ETCD)
+  add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/etcd)
+endif()
 
 # timer
 add_library(timer STATIC timer.cc)
@@ -66,12 +69,14 @@ add_library(member SHARED member.cc)
 target_compile_options(member PUBLIC ${REDIS_MODULE_CFLAGS} -fPIC)
 target_link_libraries(member ${REDIS_MODULE_LDFLAGS})
 target_link_libraries(member utils)
-target_link_libraries(member etcd3)
-target_link_libraries(member etcd_utils)
 target_link_libraries(member glog::glog)
 target_link_libraries(member ${LevelDB_LIBRARIES})
 target_link_libraries(member master_client)
 target_link_libraries(member ${MALLOC_LIBRARY} timer)
+if(CREDIS_USE_ETCD)
+    target_link_libraries(member etcd3)
+    target_link_libraries(member etcd_utils)
+endif()
 
 # Benchmarks.
 add_executable(credis_parput_bench credis_parput_bench.cc)

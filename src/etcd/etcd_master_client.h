@@ -1,9 +1,10 @@
 #ifndef CREDIS_ETCD_MASTER_CLIENT_H
 #define CREDIS_ETCD_MASTER_CLIENT_H
 
-#include "etcd_utils.h"
 #include "grpcpp/grpcpp.h"
+
 #include "src/master_client.h"
+#include "etcd_utils.h"
 
 using Watermark = MasterClient::Watermark;
 

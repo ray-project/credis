@@ -28,7 +28,12 @@ cd ..
 cd leveldb
 make -j
 cd ..
+```
 
+OPTIONAL: if you plan to use the etcd master, build needed dependencies.
+```
+# Builds etcd client library and GRPC+Protobufs
+cd credis
 cd etcd3-cpp
 git submodule update --init
 cd grpc
@@ -39,7 +44,10 @@ cd third_party/protobuf
 # it's okay if there's nothing to do for target install, that means grpc's Makefile already installed it
 make install
 cd ../../../..
+```
 
+Finally, build credis itself:
+```
 # Build credis itself
 mkdir build; cd build
 cmake ..

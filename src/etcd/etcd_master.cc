@@ -74,6 +74,32 @@ int ReplyIfFailure(RedisModuleCtx* rm_ctx,
   return 0;
 }
 
+// Convert a redis reply to a grpc::Status for an unknown error code (since
+// Redis errors are not represented 1-1 in grpc codes.)
+grpc::Status ReplyToStatus(redisContext* ctx,
+                           redisReply* reply) {
+  if (reply == NULL) {
+    return grpc::Status(grpc::StatusCode::UNKNOWN,
+                        ctx->errstr);
+  } else if (reply->type == REDIS_REPLY_ERROR) {
+    return grpc::Status(grpc::StatusCode::UNKNOWN,
+                        reply->str);
+  }
+
+  if (reply->type == REDIS_REPLY_STATUS || reply->type == REDIS_REPLY_STRING) {
+    return grpc::Status(grpc::StatusCode::OK, reply->str);
+  }
+
+  if (reply->type == REDIS_REPLY_INTEGER) {
+    return grpc::Status(grpc::StatusCode::OK, std::to_string(reply->integer));
+  }
+
+  // REDIS_REPLY_ARRAY is not covered because it requires recursive
+  // unpacking and is currently not used by credis, so there's no point in
+  // doing the extra work.
+  return grpc::Status::OK;
+}
+
 }  // anonymous namespace
 
 Status SetRole(redisContext* context,
@@ -139,20 +165,9 @@ grpc::Status ReadChain(std::deque<Member>* chain) {
   return grpc::Status::OK;
 }
 
-// Remove a replica from the chain.
-// argv[1] is the IP address of the replica to be removed
-// argv[2] is the port of the replica to be removed
-int MasterRemove_RedisCommand(RedisModuleCtx* ctx,
-                              RedisModuleString** argv,
-                              int argc) {
-  if (argc != 3) {
-    return RedisModule_WrongArity(ctx);
-  }
-
-  std::string address = ReadString(argv[1]);
-  std::string port = ReadString(argv[2]);
-  LOG(INFO) << "Got remove " << address << ":" << port;
-
+// Remove the replica at ADDRESS:PORT from the chain.
+// Returns a status that encapsulates the error.
+grpc::Status MasterRemove_Impl(std::string address, std::string port) {
   // Find the node to be removed
   size_t index = 0;
   do {
@@ -163,7 +178,7 @@ int MasterRemove_RedisCommand(RedisModuleCtx* ctx,
   } while (index < members.size());
 
   if (index == members.size()) {
-    return RedisModule_ReplyWithError(ctx, "replica not found");
+    return grpc::Status(grpc::StatusCode::NOT_FOUND, "replica not found");
   }
 
   // 3 cases. If the head or tail failed, it's simple to handle.
@@ -177,9 +192,9 @@ int MasterRemove_RedisCommand(RedisModuleCtx* ctx,
     LOG(INFO) << "Removed the last member.";
     auto status = WriteChain(members);
     if (!status.ok()) {
-      return RedisModule_ReplyWithError(ctx, status.error_message().c_str());
+      return status;
     }
-    return RedisModule_ReplyWithNull(ctx);
+    return grpc::Status::OK;
   }
 
   // Singleton case.
@@ -189,9 +204,9 @@ int MasterRemove_RedisCommand(RedisModuleCtx* ctx,
     SetRole(members[0].context, "singleton", "nil", "nil", "nil", "nil", &sn);
     auto status = WriteChain(members);
     if (!status.ok()) {
-      return RedisModule_ReplyWithError(ctx, status.error_message().c_str());
+      return status;
     }
-    return RedisModule_ReplyWithNull(ctx);
+    return grpc::Status::OK;
   }
 
   // At least 2 nodes left.
@@ -217,17 +232,41 @@ int MasterRemove_RedisCommand(RedisModuleCtx* ctx,
     LOG(INFO) << "Resending unacked updates.";
     redisReply* reply = reinterpret_cast<redisReply*>(
         redisCommand(members[index - 1].context, "MEMBER.REPLICATE"));
-    ReplyIfFailure(ctx, members[index - 1].context, reply);
+    auto status = ReplyToStatus(members[index - 1].context, reply);
+    if (!status.ok()) {
+      freeReplyObject(reply);
+      return status;
+    }
     freeReplyObject(reply);
 
     // Let writes flow through.
     reply = reinterpret_cast<redisReply*>(
         redisCommand(members[index - 1].context, "MEMBER.UNBLOCK_WRITES"));
-    ReplyIfFailure(ctx, members[index - 1].context, reply);
+    status = ReplyToStatus(members[index - 1].context, reply);
+    if (!status.ok()) {
+      freeReplyObject(reply);
+      return status;
+    }
     freeReplyObject(reply);
   }
 
-  auto status = WriteChain(members);
+  return WriteChain(members);
+}
+
+// Redis command to remove a replica.
+// argv[1] is the IP address of the replica to be removed
+// argv[2] is the port of the replica to be removed
+int MasterRemove_RedisCommand(RedisModuleCtx* ctx,
+                              RedisModuleString** argv,
+                              int argc) {
+  if (argc != 3) {
+    return RedisModule_WrongArity(ctx);
+  }
+
+  std::string address = ReadString(argv[1]);
+  std::string port = ReadString(argv[2]);
+
+  auto status = MasterRemove_Impl(address, port);
   if (!status.ok()) {
     return RedisModule_ReplyWithError(ctx, status.error_message().c_str());
   }
@@ -483,6 +522,12 @@ int RedisModule_OnLoad(RedisModuleCtx* ctx,
   // Load initial chain state.
   auto status = ReadChain(&members);
   CHECK(status.ok()) << "Could not read chain.";
+
+  for (auto member: members) {
+    if (redisReconnect(member.context) != REDIS_OK) {
+      MasterRemove_Impl(member.address, member.port);
+    }
+  }
 
   if (RedisModule_Init(ctx, "MASTER", 1, REDISMODULE_APIVER_1) ==
       REDISMODULE_ERR) {

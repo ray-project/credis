@@ -7,6 +7,7 @@
 
 #include <map>
 #include <set>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -482,6 +483,7 @@ int MemberNoPropPut_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
 // NOTE: with Sent_T handling this can be asynchronous (in the tail-add path);
 // however without handling Sent_T this function should probably be
 // synchronous.
+// TODO(zongheng): fix the note above; correct iff synchronous...
 int MemberReplicate_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
                                  int argc) {
   REDISMODULE_NOT_USED(argv);
@@ -492,29 +494,48 @@ int MemberReplicate_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
   if (module.child()) {
     DLOG(INFO) << "Called replicate. sn_to_key size "
                << module.sn_to_key().size();
-    // NOTE(zongheng): we basically use "sn_to_key" to iterate through in-memory
-    // state for convenience only.  Presumably, we can rely on some other
-    // mechanisms, such as redis' native iterator, to do this.
+
+    const size_t num_entries = module.sn_to_key().size();
+    if (num_entries == 0) {
+      return RedisModule_ReplyWithNull(ctx);
+    }
+    const std::string num_entries_str = std::to_string(num_entries);
+
+    // Schema of blob:
+    //   <key> _ <val> _ <sn> [_ <key> _ <value> _ <sn>]*
+    // where "_" denotes a single empty space.
+    // The receiver should parse the blob.
+    //
+    // Schema of the whole command:
+    //   MEMBER.NO_PROP_BATCHED_PUT <num_entries> <blob>
+
+    std::stringstream ss;
+    int cnt = 0;
     for (auto element : module.sn_to_key()) {
       KeyReader reader(ctx, element.second);
       size_t key_size, value_size;
       const char *key_data = reader.key(&key_size);
       const char *value_data = reader.value(&value_size);
-      if (!module.child()->err) {
-        const std::string sn = std::to_string(element.first);
-        const int status = redisAsyncCommand(
-            module.child(), NULL, NULL, "MEMBER.NO_PROP_PUT %b %b %b", key_data,
-            key_size, value_data, value_size, sn.data(), sn.size());
-        // TODO(zongheng): check status.
-      } else {
-        // LOG_EVERY_N(INFO, 999999999)
-        //     << "Child dead, waiting for master to intervene.";
-        // LOG_EVERY_N(INFO, 999999999)
-        //     << "Redis context error: '" <<
-        //     std::string(module.child()->errstr)
-        //     << "'.";
+      const std::string sn = std::to_string(element.first);
+      ss << key_data << " " << value_data << " " << sn;
+      if (cnt + 1 < num_entries) {
+        ss << " ";
       }
+      ++cnt;
     }
+    std::string blob;
+    ss.str(blob);
+    LOG(INFO) << "num_entries " << num_entries << " blob.size() "
+              << blob.size();
+
+    // NOTE(zongheng): we basically use "sn_to_key" to iterate through in-memory
+    // state for convenience only.  Presumably, we can rely on some other
+    // mechanisms, such as redis' native iterator, to do this.
+    const int status = redisAsyncCommand(
+        module.child(), NULL, NULL, "MEMBER.NO_PROP_BATCHED_PUT %b %b %b %b",
+        num_entries_str.data(), num_entries_str.size(), blob.data(),
+        blob.size());
+    // TODO(zongheng): check status.
   }
   return RedisModule_ReplyWithNull(ctx);
 }

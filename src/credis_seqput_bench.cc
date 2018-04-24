@@ -10,7 +10,12 @@
 #include "glog/logging.h"
 
 #include "client.h"
+#include "master_client.h"
 #include "timer.h"
+
+// Fixed-size keys and values.  Works with wr = 1 currently.
+static const int kKeySize = 25;
+static const int kValueSize = 512;
 
 std::string random_string(size_t length) {
   auto randchar = []() -> char {
@@ -37,7 +42,9 @@ std::string random_string(size_t length) {
 // If "2" is omitted in the above, by default 1 server is used.
 
 // const int N = 1000000;
-const int N = 50000;
+// const int N = 200000;
+const int N = 20000;
+
 aeEventLoop *loop = aeCreateEventLoop(64);
 int writes_completed = 0;
 int reads_completed = 0;
@@ -47,7 +54,6 @@ std::string last_issued_read_key;
 std::default_random_engine re;
 double kWriteRatio = 1.0;
 
-const long long kRetryTimerMillisecs = 100; // For ae's timer.
 double last_unacked_timestamp = -1;
 int64_t last_unacked_seqnum = -1;
 
@@ -57,6 +63,9 @@ redisAsyncContext *read_context = nullptr;
 // Client's bookkeeping for seqnums.
 std::unordered_set<int64_t> assigned_seqnums;
 std::unordered_set<int64_t> acked_seqnums;
+
+RedisClient client;
+std::shared_ptr<RedisMasterClient> master_client;
 
 // Clients also need UniqueID support.
 // TODO(zongheng): implement this properly via uuid, currently it's pid.
@@ -100,6 +109,13 @@ void OnCompleteLaunchNext(Timer *timer, int *cnt, int other_cnt) {
 // request.
 void SeqPutCallback(redisAsyncContext *write_context, // != ack_context.
                     void *r, void *) {
+  if (r == nullptr) {
+    // It is possible to be given nullptr as the reply.  For instance, a Put
+    // that gets ignored with no reply being sent; on program exit, the context
+    // runs its cleanup code, and __redisRunCallback can generate this nullptr
+    // callback; this is empircally observed.
+    return;
+  }
   const redisReply *reply = reinterpret_cast<redisReply *>(r);
   const int64_t assigned_seqnum = reply->integer;
   // LOG(INFO) << "SeqPutCallback " << assigned_seqnum;
@@ -110,6 +126,18 @@ void SeqPutCallback(redisAsyncContext *write_context, // != ack_context.
     last_unacked_seqnum = -1;
     OnCompleteLaunchNext(&writes_timer, &writes_completed, reads_completed);
   } else {
+    DLOG(INFO) << "assigning last_unacked_seqnum with value "
+               << assigned_seqnum;
+    // This is a contract with the store.  Even if the store drops writes during
+    // anomaly repair, it should return nothing for the dropped writes.  (This
+    // seems to be a better choice than returning a special value like -1, as in
+    // the future we might consider shifting the burden of generating seqnum to
+    // the client.  Under that setting, I think the client should be able to
+    // generate arbitrary seqnums, not just nonnegative numbers.  Although,
+    // hiredis / redis might have undiscovered issues with a redis module
+    // command not replying anything...)
+    CHECK(assigned_seqnum >= writes_completed)
+        << assigned_seqnum << " " << writes_completed;
     last_unacked_seqnum = assigned_seqnum;
     assigned_seqnums.insert(assigned_seqnum);
   }
@@ -120,15 +148,13 @@ void AsyncPut(bool is_retry) {
   // i -> i.
   const std::string data = std::to_string(writes_completed);
 
-  // Fixed-size keys and values.  Works with wr = 1 currently.
-  static const int kKeySize = 25;
-  static const int kValueSize = 100;
   const std::string key = random_string(kKeySize);
   const std::string value = random_string(kValueSize);
 
   // LOG(INFO) << "PUT " << data;
-  if (!is_retry)
+  if (!is_retry) {
     last_unacked_timestamp = writes_timer.TimeOpBegin();
+  }
   const int status = redisAsyncCommand(
       write_context, &SeqPutCallback,
       /*privdata=*/NULL, "MEMBER.PUT %b %b %b", key.data(), key.size(),
@@ -180,8 +206,9 @@ void SeqGetCallback(redisAsyncContext * /*context*/, void *r,
 }
 
 // This gets fired whenever an ACK from the store comes back.
-void SeqPutAckCallback(redisAsyncContext *ack_context, // != write_context.
-                       void *r, void *privdata) {
+void SeqPutAckCallbackHelper(
+    redisAsyncContext *ack_context, // != write_context.
+    void *r, void *privdata, bool issue_first_cmd) {
   /* Replies to the SUBSCRIBE command have 3 elements. There are two
    * possibilities. Either the reply is the initial acknowledgment of the
    * subscribe command, or it is a message. If it is the initial acknowledgment,
@@ -194,19 +221,24 @@ void SeqPutAckCallback(redisAsyncContext *ack_context, // != write_context.
    *     - reply->element[1]->str is the name of the channel
    *     - reply->emement[2]->str is the contents of the message.
    */
-  const redisReply *reply = reinterpret_cast<redisReply *>(r);
-  const redisReply *message_type = reply->element[0];
-
-  if (reply == nullptr) {
-    LOG(INFO) << "reply nullptr: " << ack_context->errstr;
+  if (r == nullptr) {
+    DLOG(INFO)
+        << "Received null reply, ignoring (could happen upon the removal "
+           "or reconnection of fault server nodes)";
+    // NOTE(zongheng): accessing ack_context at all might cause segfaults. Even
+    // for (ack_context == nullptr) test.  Weird.
+    return;
   }
+  const redisReply *reply = reinterpret_cast<redisReply *>(r);
 
-  // NOTE(zongheng): this is a hack.
-  // if (strcmp(message_type->str, "message") == 0) {
+  // NOTE(zongheng): this check is a hack to see if the msg is a
+  // subscribe-success message.
   if (reply->element[2]->str == nullptr) {
     LOG(INFO) << getpid() << " subscribed";
     LOG(INFO) << getpid() << " chan: " << reply->element[1]->str;
-    AsyncRandomCommand();
+    if (issue_first_cmd) {
+      AsyncRandomCommand();
+    }
     return;
   }
   const int64_t received_sn = std::stoi(reply->element[2]->str);
@@ -218,32 +250,104 @@ void SeqPutAckCallback(redisAsyncContext *ack_context, // != write_context.
     return;
   }
   // Otherwise, found & act on this ACK.
-  // LOG(INFO) << "seqnum acked " << received_sn;
+  DLOG(INFO) << "seqnum acked " << received_sn
+             << "; setting last_unacked_{timestamp,seqnum} to -1";
   assigned_seqnums.erase(it);
   last_unacked_timestamp = -1;
   last_unacked_seqnum = -1;
   OnCompleteLaunchNext(&writes_timer, &writes_completed, reads_completed);
 }
 
-// const double kRetryTimeoutMicrosecs = 500000;
-const double kRetryTimeoutMicrosecs = 5 * 1e6; // 5 sec
+void SeqPutAckCallback(redisAsyncContext *ack_context, // != write_context.
+                       void *r, void *privdata) {
+  return SeqPutAckCallbackHelper(ack_context, r, privdata,
+                                 /*issue_first_cmd=*/true);
+}
+void SeqPutAckCallbackAfterRefresh(
+    redisAsyncContext *ack_context, // != write_context.
+    void *r, void *privdata) {
+  return SeqPutAckCallbackHelper(ack_context, r, privdata,
+                                 /*issue_first_cmd=*/false);
+}
+
+// TODO(zongheng): if same "writes_completed" stalled for more than X times,
+// e.g. 3, trigger refresh tail -> ConnectContext(new_tail_port) ->
+// RegisterAckCallback(new_tail)
+
+// Fires at this frequency.
+const long long kRetryTimerMillisecs = 100; // For ae's timer.
+// Represents the timeout which if exceeded, we retry last unacked command.
+const double kRetryTimeoutMicrosecs = 1 * 1e5; // 100 ms
+// const double kRetryTimeoutMicrosecs = 1 * 1e6; // 1 sec
+// const double kRetryTimeoutMicrosecs = 5 * 1e6; // 5 sec
+
+const long long kRefreshTailTimerMillisecs = 100;
+// A value of "N * kRetryTimeoutMicrosecs" here means (N - 1) retries have
+// been issued, none are heard back.  Must be N > 1.
+//
+// This knob normally forms the upper bound on
+// time-from-first-retry-to-next-success.
+const double kRefreshTailPutThresholdMicrosecs = 2 * kRetryTimeoutMicrosecs;
+
+// TODO(zongheng): what's to prevent us from reconnecting to the tail in a loop,
+// except by luck?
+int RefreshTailTimer(aeEventLoop *loop, long long /*timer_id*/, void *) {
+  const double now_us = writes_timer.NowMicrosecs();
+  const double diff = now_us - last_unacked_timestamp;
+  if (last_unacked_timestamp == -1 ||
+      diff < kRefreshTailPutThresholdMicrosecs) {
+    // LOG(INFO) << "RefreshTailTimer: last_unacked_timestamp "
+    //           << last_unacked_timestamp << " diff " << diff;
+    // Fire again at this distance from now.
+    return kRefreshTailTimerMillisecs;
+  }
+
+  DLOG(INFO) << "In RefreshTailTimer";
+
+  // Otherwise, ask master for new tail, and connect to it.
+  std::string tail_address;
+  int tail_port;
+  DLOG(INFO) << "Issuing Tail()";
+  CHECK(master_client->Tail(&tail_address, &tail_port).ok());
+  DLOG(INFO) << "Issuing ReconnectAckContext()";
+  CHECK(client
+            .ReconnectAckContext(
+                tail_address, tail_port,
+                static_cast<redisCallbackFn *>(&SeqPutAckCallbackAfterRefresh))
+            .ok());
+  DLOG(INFO) << "AckContext reconnected, port: "
+             << client.read_context()->c.tcp.port;
+
+  // Fire again at this distance from now.
+  // We choose to lengthen this window to not uncessarily refresh the tail too
+  // frequently.  Using 1x results in one (observed) extra refresh in some
+  // setting.
+  return kRefreshTailTimerMillisecs * 2;
+}
+
 int RetryPutTimer(aeEventLoop *loop, long long /*timer_id*/, void *) {
   const double now_us = writes_timer.NowMicrosecs();
   const double diff = now_us - last_unacked_timestamp;
   if (last_unacked_timestamp > 0 && diff > kRetryTimeoutMicrosecs) {
-    LOG(INFO) << "Retrying PUT " << writes_completed;
+    LOG(INFO) << "Retrying PUT, writes_completed " << writes_completed;
     LOG(INFO) << " time diff (us) " << diff << "; last_unacked_seqnum "
               << last_unacked_seqnum;
-    // If the ACK comes back later, we should ignore it.
+    // If the ACK for "last_unacked_seqnum" comes back later, we should ignore
+    // it, since we are about to retry and will associate a new seqnum to the
+    // retried op.
     if (last_unacked_seqnum >= 0) {
       auto it = assigned_seqnums.find(last_unacked_seqnum);
       CHECK(it != assigned_seqnums.end());
       assigned_seqnums.erase(it);
+      // We do not assign -1 to "last_unacked_timestamp" because it should
+      // capture the original op's start time.
       last_unacked_seqnum = -1;
     }
     AsyncPut(/*is_retry=*/true);
+
+    // return kRetryTimeoutMicrosecs;
   }
-  return kRetryTimerMillisecs; // Reset ae's timer to 0.
+  return kRetryTimerMillisecs; // Fire at this distance from now.
 }
 
 int main(int argc, char **argv) {
@@ -263,9 +367,10 @@ int main(int argc, char **argv) {
             << write_port << " ack_port " << ack_port << " write_ratio "
             << kWriteRatio << " server " << server;
 
-  RedisClient client;
   CHECK(client.Connect(server, write_port, ack_port).ok());
   CHECK(client.AttachToEventLoop(loop).ok());
+  master_client = std::make_shared<RedisMasterClient>();
+  CHECK(master_client->Connect(server, 6369).ok()); // TODO(zongheng): arg.
 
   // NOTE(zongheng): RegisterAckCallback() subscribes ME to a channel.
   // SeqPutAckCallback is responsible for listening for:
@@ -293,7 +398,10 @@ int main(int argc, char **argv) {
   writes_timer.ExpectOps(N);
 
   aeCreateTimeEvent(loop, /*milliseconds=*/kRetryTimerMillisecs, &RetryPutTimer,
-                    NULL, NULL);
+                    /*clientData=*/NULL, /*finalizerProc=*/NULL);
+  aeCreateTimeEvent(loop, /*milliseconds=*/kRefreshTailTimerMillisecs,
+                    &RefreshTailTimer, /*clientData=*/NULL,
+                    /*finalizerProc=*/NULL);
 
   std::this_thread::sleep_for(std::chrono::seconds(1));
   LOG(INFO) << "starting bench";
@@ -321,8 +429,9 @@ int main(int argc, char **argv) {
   double writes_mean = 0, writes_std = 0;
   writes_timer.Stats(&writes_mean, &writes_std);
 
-  const std::string pathname =
-      "client-" + std::to_string(getpid()) + "-" + argv[1] + "nodes.csv";
+  const int pid = getpid();
+  const std::string pathname = "client-" + std::to_string(pid) + "-" +
+                               std::to_string(num_chain_nodes) + "nodes.csv";
   merged.WriteToFile(pathname);
 
   LOG(INFO) << "throughput " << N * 1e6 / latency_us
@@ -344,6 +453,6 @@ int main(int argc, char **argv) {
   LOG(INFO) << "reads_lat (us) mean " << reads_mean << " std " << reads_std;
   LOG(INFO) << "writes_lat (us) mean " << writes_mean << " std " << writes_std;
 
-  LOG(INFO) << "pid " << getpid();
+  LOG(INFO) << "pid " << pid;
   return 0;
 }

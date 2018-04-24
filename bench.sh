@@ -2,6 +2,7 @@
 set -ex
 
 SERVER=${1:-127.0.0.1}
+NODE_ADD=${2:-""}
 
 pushd build
 make -j
@@ -49,7 +50,7 @@ for write_ratio in 1 ; do
         for num_clients in 1; do
         # for num_clients in $(seq 32 -4 1); do
             sleep 5
-            ./seqput.sh $num_clients $num_nodes $write_ratio $SERVER &
+            ./seqput.sh $num_clients $num_nodes $write_ratio $SERVER $NODE_ADD &
             wait
         done
       #done

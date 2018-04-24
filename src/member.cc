@@ -28,7 +28,7 @@ extern "C" {
 Timer timer;
 
 extern "C" {
-aeEventLoop* getEventLoop();
+aeEventLoop *getEventLoop();
 }
 
 // TODO(zongheng): whenever we are about to do redisAsyncCommand(remote, ...),
@@ -42,19 +42,16 @@ RedisChainModule module;
 
 namespace {
 
-int DoFlush(RedisModuleCtx* ctx,
-            int64_t sn_left,
-            int64_t sn_right,
-            int64_t sn_ckpt,
-            const std::vector<std::string>& flushable_keys) {
+int DoFlush(RedisModuleCtx *ctx, int64_t sn_left, int64_t sn_right,
+            int64_t sn_ckpt, const std::vector<std::string> &flushable_keys) {
   CHECK(module.gcs_mode() == RedisChainModule::GcsMode::kCkptFlush);
 
   const int64_t old = module.key_to_sn().size();
 
-  for (const std::string& key : flushable_keys) {
-    RedisModuleString* rms =
+  for (const std::string &key : flushable_keys) {
+    RedisModuleString *rms =
         RedisModule_CreateString(ctx, key.data(), key.size());
-    RedisModuleKey* rmkey = reinterpret_cast<RedisModuleKey*>(
+    RedisModuleKey *rmkey = reinterpret_cast<RedisModuleKey *>(
         RedisModule_OpenKey(ctx, rms, REDISMODULE_READ | REDISMODULE_WRITE));
     CHECK(REDISMODULE_OK == RedisModule_DeleteKey(rmkey));
     RedisModule_CloseKey(rmkey);
@@ -127,17 +124,15 @@ int DoFlush(RedisModuleCtx* ctx,
 
 // Collect all keys with sn in [sn_left, sn_right), and that are not dirty
 // w.r.t. sn_ckpt.
-void CollectFlushableKeys(int64_t sn_left,
-                          int64_t sn_right,
-                          int64_t sn_ckpt,
-                          std::vector<std::string>* flushable_keys) {
-  const auto& sn_to_key = module.sn_to_key();
-  const auto& key_to_sn = module.key_to_sn();
+void CollectFlushableKeys(int64_t sn_left, int64_t sn_right, int64_t sn_ckpt,
+                          std::vector<std::string> *flushable_keys) {
+  const auto &sn_to_key = module.sn_to_key();
+  const auto &key_to_sn = module.key_to_sn();
 
   for (int64_t seqnum = sn_left; seqnum < sn_right; ++seqnum) {
     const auto it = sn_to_key.find(seqnum);
     CHECK(it != sn_to_key.end());
-    const std::string& key_str(it->second);
+    const std::string &key_str(it->second);
     const auto it_keytosn = key_to_sn.find(key_str);
 
     if (it_keytosn == key_to_sn.end()) {
@@ -167,12 +162,9 @@ void CollectFlushableKeys(int64_t sn_left,
 //
 // For tail: publish that the request has been finalized, and ack up to the
 // chain.
-int Put(RedisModuleCtx* ctx,
-        RedisModuleString* name,
-        RedisModuleString* data,
-        RedisModuleString* client_id,
-        long long sn) {
-  RedisModuleKey* key = reinterpret_cast<RedisModuleKey*>(
+int Put(RedisModuleCtx *ctx, RedisModuleString *name, RedisModuleString *data,
+        RedisModuleString *client_id, long long sn) {
+  RedisModuleKey *key = reinterpret_cast<RedisModuleKey *>(
       RedisModule_OpenKey(ctx, name, REDISMODULE_WRITE));
   CHECK(REDISMODULE_OK == RedisModule_StringSet(key, data))
       << "key " << key << " sn " << sn;
@@ -202,13 +194,13 @@ int Put(RedisModuleCtx* ctx,
     //      return RedisModule_ReplyWithCallReply(ctx, reply);
     //    }
 
-    RedisModuleString* s =
+    RedisModuleString *s =
         RedisModule_CreateString(ctx, seqnum_str.data(), seqnum_str.size());
     RedisModule_Publish(client_id, s);
     RedisModule_FreeString(ctx, s);
 
     if (module.parent()) {
-      RedisModuleCallReply* reply =
+      RedisModuleCallReply *reply =
           RedisModule_Call(ctx, "MEMBER.ACK", "c", seqnum_str.c_str());
       if (RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_ERROR) {
         return RedisModule_ReplyWithCallReply(ctx, reply);
@@ -223,11 +215,11 @@ int Put(RedisModuleCtx* ctx,
     if (!module.child()->err) {
       // Zero-copy.
       size_t key_len = 0;
-      const char* key_ptr = ReadString(name, &key_len);
+      const char *key_ptr = ReadString(name, &key_len);
       size_t val_len = 0;
-      const char* val_ptr = ReadString(data, &val_len);
+      const char *val_ptr = ReadString(data, &val_len);
       size_t cid_len = 0;
-      const char* cid_ptr = ReadString(client_id, &cid_len);
+      const char *cid_ptr = ReadString(client_id, &cid_len);
 
       const int status = redisAsyncCommand(
           module.child(), NULL, NULL, "MEMBER.PROPAGATE %b %b %b %b", key_ptr,
@@ -258,7 +250,7 @@ int Put(RedisModuleCtx* ctx,
   return REDISMODULE_OK;
 }
 
-}  // namespace
+} // namespace
 
 // Set the role, successor and predecessor of this server.
 // Each of the arguments can be the empty string, in which case it is not set.
@@ -272,8 +264,7 @@ int Put(RedisModuleCtx* ctx,
 //     removal) and -1 if no node is removed
 // argv[7]: drop_writes?
 // Returns the latest sequence number on this node
-int MemberSetRole_RedisCommand(RedisModuleCtx* ctx,
-                               RedisModuleString** argv,
+int MemberSetRole_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
                                int argc) {
   if (argc != 8) {
     return RedisModule_WrongArity(ctx);
@@ -308,24 +299,28 @@ int MemberSetRole_RedisCommand(RedisModuleCtx* ctx,
     next_port = module.next_port();
   }
 
+  DLOG(INFO) << "MemberSetRole args: " << role << " " << prev_address << " "
+             << prev_port << " " << next_address << " " << next_port;
+
   module.Reset(prev_address, prev_port, next_address, next_port);
 
   if (module.child()) {
     CHECK(!module.child()->err);
-    aeEventLoop* loop = getEventLoop();
+    aeEventLoop *loop = getEventLoop();
     redisAeAttach(loop, module.child());
   }
 
   if (module.parent()) {
     CHECK(!module.parent()->err);
-    aeEventLoop* loop = getEventLoop();
+    aeEventLoop *loop = getEventLoop();
     redisAeAttach(loop, module.parent());
   }
 
   const int64_t first_sn = std::stoi(ReadString(argv[6]));
   const bool drop_writes = std::stoi(ReadString(argv[7])) ? true : false;
   LOG(INFO) << "In MemberSetRole drop_writes: " << drop_writes;
-  if (drop_writes) module.SetDropWrites(drop_writes);
+  if (drop_writes)
+    module.SetDropWrites(drop_writes);
 
   // TODO(zongheng): I don't understand why we do this.
   if (module.child()) {
@@ -335,7 +330,7 @@ int MemberSetRole_RedisCommand(RedisModuleCtx* ctx,
       std::string key = i->second;
       KeyReader reader(ctx, key);
       size_t size;
-      const char* value = reader.value(&size);
+      const char *value = reader.value(&size);
       if (!module.child()->err) {
         const int status = redisAsyncCommand(
             module.child(), NULL, NULL, "MEMBER.PROPAGATE %b %b %b", key.data(),
@@ -354,18 +349,18 @@ int MemberSetRole_RedisCommand(RedisModuleCtx* ctx,
   return REDISMODULE_OK;
 }
 
-int MemberConnectToMaster_RedisCommand(RedisModuleCtx* ctx,
-                                       RedisModuleString** argv,
-                                       int argc) {
+int MemberConnectToMaster_RedisCommand(RedisModuleCtx *ctx,
+                                       RedisModuleString **argv, int argc) {
   if (argc != 3) {
     return RedisModule_WrongArity(ctx);
   }
   size_t size = 0;
-  const char* ptr = RedisModule_StringPtrLen(argv[1], &size);
+  const char *ptr = RedisModule_StringPtrLen(argv[1], &size);
   long long port = 0;
   RedisModule_StringToLongLong(argv[2], &port);
   Status s = module.ConnectToMaster(std::string(ptr, size), port);
-  if (!s.ok()) return RedisModule_ReplyWithError(ctx, s.ToString().data());
+  if (!s.ok())
+    return RedisModule_ReplyWithError(ctx, s.ToString().data());
   return RedisModule_ReplyWithSimpleString(ctx, "OK");
 }
 
@@ -373,8 +368,7 @@ int MemberConnectToMaster_RedisCommand(RedisModuleCtx* ctx,
 // argv[1] is the key for the data
 // argv[2] is the data
 // argv[3] is unique client id
-int MemberPut_RedisCommand(RedisModuleCtx* ctx,
-                           RedisModuleString** argv,
+int MemberPut_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
                            int argc) {
   if (argc != 4) {
     return RedisModule_WrongArity(ctx);
@@ -396,23 +390,35 @@ int MemberPut_RedisCommand(RedisModuleCtx* ctx,
       return Put(ctx, argv[1], argv[2], argv[3], sn);
     } else {
       // The store, by contract, is allowed to ignore writes during faults.
-      return RedisModule_ReplyWithNull(ctx);
-      // return RedisModule_ReplyWithError(
-      //     ctx, "Server set to drop_writes mode, retry?");
+      //
+      // Returning nothing seems to be a better choice than returning a special
+      // value like -1, as in the future we might consider shifting the burden
+      // of generating seqnum to the client.  Under that setting, I think the
+      // client should be able to generate arbitrary seqnums, not just
+      // nonnegative numbers.  Although, hiredis / redis might have
+      // undiscovered issues with a redis module command not replying
+      // anything...
+      //
+      // Note, though, we should not do the following:
+      //     return RedisModule_ReplyWithNull(ctx);
+      // as the redis protocol will translate this into the equivalent of
+      // returning a normal long long with value 0.  This could be confusing
+      // since a seqnum of 0 appears to be a valid reply to the client.
+
+      // return RedisModule_ReplyWithLongLong(ctx, -1);
     }
   } else {
     return RedisModule_ReplyWithError(ctx, "ERR called PUT on non-head node");
   }
 }
 
-int NoReply_RedisCommand(RedisModuleCtx* ctx,
-                         RedisModuleString** argv,
+int NoReply_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
                          int argc) {
   if (argc != 1) {
     return RedisModule_WrongArity(ctx);
   }
   LOG(INFO) << "Processed NoReply";
-  return 0;  // STATUS_OK
+  return 0; // STATUS_OK
 }
 
 // Propagate a put request down the chain
@@ -420,8 +426,7 @@ int NoReply_RedisCommand(RedisModuleCtx* ctx,
 // argv[2] is the data
 // argv[3] is the sequence number for this update request
 // argv[4] is unique client id
-int MemberPropagate_RedisCommand(RedisModuleCtx* ctx,
-                                 RedisModuleString** argv,
+int MemberPropagate_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
                                  int argc) {
   if (argc != 5) {
     return RedisModule_WrongArity(ctx);
@@ -447,8 +452,7 @@ int MemberPropagate_RedisCommand(RedisModuleCtx* ctx,
 // argv[1]: key
 // argv[2]: val
 // argv[3]: sn
-int MemberNoPropPut_RedisCommand(RedisModuleCtx* ctx,
-                                 RedisModuleString** argv,
+int MemberNoPropPut_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
                                  int argc) {
   if (argc != 4) {
     return RedisModule_WrongArity(ctx);
@@ -460,7 +464,7 @@ int MemberNoPropPut_RedisCommand(RedisModuleCtx* ctx,
 
   // Redis state.
   // No propagation: just state maintenance.
-  RedisModuleKey* key = reinterpret_cast<RedisModuleKey*>(
+  RedisModuleKey *key = reinterpret_cast<RedisModuleKey *>(
       RedisModule_OpenKey(ctx, argv[1], REDISMODULE_WRITE));
   RedisModule_StringSet(key, argv[2]);
   RedisModule_CloseKey(key);
@@ -478,8 +482,7 @@ int MemberNoPropPut_RedisCommand(RedisModuleCtx* ctx,
 // NOTE: with Sent_T handling this can be asynchronous (in the tail-add path);
 // however without handling Sent_T this function should probably be
 // synchronous.
-int MemberReplicate_RedisCommand(RedisModuleCtx* ctx,
-                                 RedisModuleString** argv,
+int MemberReplicate_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
                                  int argc) {
   REDISMODULE_NOT_USED(argv);
   if (argc != 1) {
@@ -495,8 +498,8 @@ int MemberReplicate_RedisCommand(RedisModuleCtx* ctx,
     for (auto element : module.sn_to_key()) {
       KeyReader reader(ctx, element.second);
       size_t key_size, value_size;
-      const char* key_data = reader.key(&key_size);
-      const char* value_data = reader.value(&value_size);
+      const char *key_data = reader.key(&key_size);
+      const char *value_data = reader.value(&value_size);
       if (!module.child()->err) {
         const std::string sn = std::to_string(element.first);
         const int status = redisAsyncCommand(
@@ -519,8 +522,7 @@ int MemberReplicate_RedisCommand(RedisModuleCtx* ctx,
 // Send ack up the chain.
 // This could be batched in the future if we want to.
 // argv[1] is the sequence number that is acknowledged
-int MemberAck_RedisCommand(RedisModuleCtx* ctx,
-                           RedisModuleString** argv,
+int MemberAck_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
                            int argc) {
   if (argc != 2) {
     return RedisModule_WrongArity(ctx);
@@ -542,11 +544,11 @@ int MemberAck_RedisCommand(RedisModuleCtx* ctx,
 
 // Let new writes flow through.
 // Used in the node addition code path (see MASTER.ADD).
-int MemberUnblockWrites_RedisCommand(RedisModuleCtx* ctx,
-                                     RedisModuleString** argv,
-                                     int argc) {
+int MemberUnblockWrites_RedisCommand(RedisModuleCtx *ctx,
+                                     RedisModuleString **argv, int argc) {
   REDISMODULE_NOT_USED(argv);
-  if (argc != 1) return RedisModule_WrongArity(ctx);
+  if (argc != 1)
+    return RedisModule_WrongArity(ctx);
   LOG(INFO) << "Unblocking writes";
   module.SetDropWrites(false);
   return RedisModule_ReplyWithNull(ctx);
@@ -563,12 +565,11 @@ const int kMaxEntriesToFlushOnce = 350000;
 //
 // Returns the number of sequence numbers newly checkpointed.  Errors out if
 // not called on the tail.
-int TailCheckpoint_RedisCommand(RedisModuleCtx* ctx,
-                                RedisModuleString** argv,
+int TailCheckpoint_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
                                 int argc) {
   const double start = timer.NowMicrosecs();
   REDISMODULE_NOT_USED(argv);
-  if (argc != 1) {  // No arg needed.
+  if (argc != 1) { // No arg needed.
     return RedisModule_WrongArity(ctx);
   }
   if (!module.ActAsTail()) {
@@ -596,7 +597,7 @@ int TailCheckpoint_RedisCommand(RedisModuleCtx* ctx,
   // Fill in "redis key -> redis value".
   std::vector<std::string> keys_to_write;
   std::vector<std::string> vals_to_write;
-  const auto& sn_to_key = module.sn_to_key();
+  const auto &sn_to_key = module.sn_to_key();
   size_t size = 0;
   for (int64_t s = sn_ckpt; s <= sn_bound; ++s) {
     auto i = sn_to_key.find(s);
@@ -604,7 +605,7 @@ int TailCheckpoint_RedisCommand(RedisModuleCtx* ctx,
         << "ERR the sn_to_key map doesn't contain seqnum " << s;
     std::string key = i->second;
     const KeyReader reader(ctx, key);
-    const char* value = reader.value(&size);
+    const char *value = reader.value(&size);
 
     keys_to_write.push_back(key);
     vals_to_write.emplace_back(std::string(value, size));
@@ -616,10 +617,10 @@ int TailCheckpoint_RedisCommand(RedisModuleCtx* ctx,
     batch.Put(keys_to_write[i], vals_to_write[i]);
   }
   // Open the checkpoint.
-  leveldb::DB* ckpt;
+  leveldb::DB *ckpt;
   s = module.OpenCheckpoint(&ckpt);
   HandleNonOk(ctx, s);
-  std::unique_ptr<leveldb::DB> ptr(ckpt);  // RAII.
+  std::unique_ptr<leveldb::DB> ptr(ckpt); // RAII.
   // TODO(zongheng): tune WriteOptions (sync, compression, etc).
   s = ckpt->Write(leveldb::WriteOptions(), &batch);
   HandleNonOk(ctx, s);
@@ -643,12 +644,12 @@ int TailCheckpoint_RedisCommand(RedisModuleCtx* ctx,
 // Replies to the client # of keys removed from redis state, including 0.
 //
 // Errors out if not called on the head, or if GcsMode is not kCkptFlush.
-int HeadFlush_RedisCommand(RedisModuleCtx* ctx,
-                           RedisModuleString** argv,
+int HeadFlush_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
                            int argc) {
   const double start = timer.NowMicrosecs();
   REDISMODULE_NOT_USED(argv);
-  if (argc != 1) return RedisModule_WrongArity(ctx);  // No args needed.
+  if (argc != 1)
+    return RedisModule_WrongArity(ctx); // No args needed.
   if (!module.ActAsHead()) {
     return RedisModule_ReplyWithError(
         ctx, "ERR this command must be called on the head.");
@@ -684,10 +685,10 @@ int HeadFlush_RedisCommand(RedisModuleCtx* ctx,
 // Internal command that propagates a flush.  Users should never call.
 // Args, all required and are int:
 //   <sn_left>  <sn_right>  <sn_ckpt>
-int MemberFlush_RedisCommand(RedisModuleCtx* ctx,
-                             RedisModuleString** argv,
+int MemberFlush_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
                              int argc) {
-  if (argc != 4) return RedisModule_WrongArity(ctx);
+  if (argc != 4)
+    return RedisModule_WrongArity(ctx);
 
   long long sn_left, sn_right, sn_ckpt;
   RedisModule_StringToLongLong(argv[1], &sn_left);
@@ -705,20 +706,19 @@ int MemberFlush_RedisCommand(RedisModuleCtx* ctx,
 // LIST.CHECKPOINT: print to stdout all keys, values in the checkpoint file.
 //
 // For debugging.
-int ListCheckpoint_RedisCommand(RedisModuleCtx* ctx,
-                                RedisModuleString** argv,
+int ListCheckpoint_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
                                 int argc) {
   REDISMODULE_NOT_USED(argv);
-  if (argc != 1) {  // No arg needed.
+  if (argc != 1) { // No arg needed.
     return RedisModule_WrongArity(ctx);
   }
-  leveldb::DB* ckpt;
+  leveldb::DB *ckpt;
   Status s = module.OpenCheckpoint(&ckpt);
   HandleNonOk(ctx, s);
-  std::unique_ptr<leveldb::DB> ptr(ckpt);  // RAII.
+  std::unique_ptr<leveldb::DB> ptr(ckpt); // RAII.
   // LOG_EVERY_N(INFO, 999999999) << "-- LIST.CHECKPOINT:";
-  leveldb::Iterator* it = ckpt->NewIterator(leveldb::ReadOptions());
-  std::unique_ptr<leveldb::Iterator> iptr(it);  // RAII.
+  leveldb::Iterator *it = ckpt->NewIterator(leveldb::ReadOptions());
+  std::unique_ptr<leveldb::Iterator> iptr(it); // RAII.
   for (it->SeekToFirst(); it->Valid(); it->Next()) {
     if (it->key().ToString() == kCheckpointHeaderKey) {
       // Let's skip the special header for prettier printing.
@@ -733,7 +733,7 @@ int ListCheckpoint_RedisCommand(RedisModuleCtx* ctx,
 }
 
 // READ: like redis' own GET, but can fall back to checkpoint file.
-int Read_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv, int argc) {
+int Read_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
   if (argc != 2) {
     return RedisModule_WrongArity(ctx);
   }
@@ -745,17 +745,17 @@ int Read_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv, int argc) {
   KeyReader reader(ctx, argv[1]);
   if (!reader.IsEmpty()) {
     size_t size = 0;
-    const char* value = reader.value(&size);
+    const char *value = reader.value(&size);
     return RedisModule_ReplyWithStringBuffer(ctx, value, size);
   } else {
     // Fall back to checkpoint file.
-    leveldb::DB* ckpt;
+    leveldb::DB *ckpt;
     Status s = module.OpenCheckpoint(&ckpt);
     HandleNonOk(ctx, s);
-    std::unique_ptr<leveldb::DB> ptr(ckpt);  // RAII.
+    std::unique_ptr<leveldb::DB> ptr(ckpt); // RAII.
 
     size_t size = 0;
-    const char* key = reader.key(&size);
+    const char *key = reader.key(&size);
     std::string value;
     s = ckpt->Get(leveldb::ReadOptions(), leveldb::Slice(key, size), &value);
     if (s.IsNotFound()) {
@@ -769,11 +769,10 @@ int Read_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv, int argc) {
 // MEMBER.SN: the largest SN processed by this node.
 //
 // For debugging.
-int MemberSn_RedisCommand(RedisModuleCtx* ctx,
-                          RedisModuleString** argv,
+int MemberSn_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
                           int argc) {
   REDISMODULE_NOT_USED(argv);
-  if (argc != 1) {  // No arg needed.
+  if (argc != 1) { // No arg needed.
     return RedisModule_WrongArity(ctx);
   }
   return RedisModule_ReplyWithLongLong(ctx, module.sn());
@@ -786,10 +785,9 @@ extern "C" {
 // If not specified, defaults to kNormal (checkpointing and flushing turned
 // off).
 //   argv[1] indicates the MasterType: 0 for redis (default), 1 for etcd
-int RedisModule_OnLoad(RedisModuleCtx* ctx,
-                       RedisModuleString** argv,
+int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv,
                        int argc) {
-  FLAGS_logtostderr = 1;  // By default glog uses log files in /tmp.
+  FLAGS_logtostderr = 1; // By default glog uses log files in /tmp.
   ::google::InitGoogleLogging("libmember");
 
   // Init.  Must be at the top.
@@ -888,7 +886,7 @@ int RedisModule_OnLoad(RedisModuleCtx* ctx,
 
   if (RedisModule_CreateCommand(
           ctx, "READ", Read_RedisCommand,
-          "readonly",  // TODO(zongheng): is this ok?  It opens the db.
+          "readonly", // TODO(zongheng): is this ok?  It opens the db.
           /*firstkey=*/-1, /*lastkey=*/-1,
           /*keystep=*/0) == REDISMODULE_ERR) {
     return REDISMODULE_ERR;

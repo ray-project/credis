@@ -4,6 +4,7 @@ NUM_CLIENTS=${1:-1}
 NUM_NODES=${2:-1}
 WRITE_RATIO=${3:-1}
 SERVER=${4:-127.0.0.1}
+NODE_ADD=${5:-""}
 
 # Example usage:
 #
@@ -19,7 +20,7 @@ pkill -f credis_seqput_bench
 
 ssh -o StrictHostKeyChecking=no ubuntu@${SERVER} << EOF
 cd ~/credis
-pkill -f redis-server
+pkill -f -9 redis-server
 sleep 2
 ./setup.sh $NUM_NODES
 sleep 2
@@ -31,6 +32,17 @@ for i in $(seq 1 $NUM_CLIENTS); do
   logfile=${NUM_CLIENTS}clients-${i}-chain-${NUM_NODES}node-wr${WRITE_RATIO}.log
   ./build/src/credis_seqput_bench $NUM_NODES $WRITE_RATIO $SERVER >${logfile} 2>&1 &
 done
+
+# Optionally, do node addition.
+if [ ! -z "${NODE_ADD}" ]; then
+    sleep ${NODE_ADD}
+    echo 'Performing node addition...'
+    ssh -o StrictHostKeyChecking=no ubuntu@${SERVER} << EOF
+cd ~/credis
+bash add.sh
+EOF
+fi
+
 wait
 
 logs="${NUM_CLIENTS}clients-*-chain-${NUM_NODES}node-wr${WRITE_RATIO}.log"

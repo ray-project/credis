@@ -17,7 +17,7 @@ function setup() {
     popd
 
     # Master.
-    ./redis/src/redis-server --loadmodule ./build/src/libmaster.so --port 6369 &> master.log &
+    ./redis/src/redis-server --loadmodule ./build/src/libmaster.so --port 6369 --protected-mode no &> master.log &
 
     port=6369
     for i in $(seq 1 $NUM_NODES); do
@@ -30,7 +30,8 @@ function setup() {
       ./redis/src/redis-server --loadmodule ./build/src/libmember.so ${gcs_mode} --port $port --protected-mode no &> $port.log &
 
       sleep 0.5
-      ./redis/src/redis-cli -p 6369 MASTER.ADD 127.0.0.1 $port
+      myip=$(curl ipinfo.io/ip)
+      ./redis/src/redis-cli -p 6369 MASTER.ADD ${myip} $port
 
       # Have chain nodes connect to master.
       sleep 0.5

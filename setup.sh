@@ -26,6 +26,7 @@ function setup() {
 
     myip=$(curl ipinfo.io/ip)
 
+    myip=$(curl ipinfo.io/ip)
     port=6369
     for i in $(seq 1 $NUM_NODES); do
       port=$(expr $port + 1)
@@ -35,7 +36,12 @@ function setup() {
       sleep 0.5
       ./redis/src/redis-cli -h ${HEAD_SERVER} -p 6369 MASTER.ADD ${myip} $port
 
+
+# Have chain nodes connect to master.
+#    sleep 0.5
+#    ./redis/src/redis-cli -p $port MEMBER.CONNECT_TO_MASTER 127.0.0.1 6369
     done
+    # ./redis/src/redis-cli -p 6370 MONITOR &>monitor-6370.log &
 }
 
 setup

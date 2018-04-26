@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <cstdlib>
+#include <iostream>
 #include <map>
 #include <set>
 #include <sstream>
@@ -167,8 +169,8 @@ int Put(RedisModuleCtx* ctx, RedisModuleString* name, RedisModuleString* data,
         RedisModuleString* client_id, long long sn) {
   RedisModuleKey* key = reinterpret_cast<RedisModuleKey*>(
       RedisModule_OpenKey(ctx, name, REDISMODULE_WRITE));
-  CHECK(REDISMODULE_OK == RedisModule_StringSet(key, data)) << "key " << key
-                                                            << " sn " << sn;
+  CHECK(REDISMODULE_OK == RedisModule_StringSet(key, data))
+      << "key " << key << " sn " << sn;
   RedisModule_CloseKey(key);
 
   // State maintenance.
@@ -200,13 +202,13 @@ int Put(RedisModuleCtx* ctx, RedisModuleString* name, RedisModuleString* data,
     RedisModule_Publish(client_id, s);
     RedisModule_FreeString(ctx, s);
 
-    if (module.parent()) {
-      RedisModuleCallReply* reply =
-          RedisModule_Call(ctx, "MEMBER.ACK", "c", seqnum_str.c_str());
-      if (RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_ERROR) {
-        return RedisModule_ReplyWithCallReply(ctx, reply);
-      }
-    }
+    // if (module.parent()) {
+    //  RedisModuleCallReply* reply =
+    //      RedisModule_Call(ctx, "MEMBER.ACK", "c", seqnum_str.c_str());
+    //  if (RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_ERROR) {
+    //    return RedisModule_ReplyWithCallReply(ctx, reply);
+    //  }
+    //}
   } else {
     // NOTE: here we do redisAsyncCommand(child, ...).  However, if the child
     // crashed before the call, this function non-deterministically crashes
@@ -228,7 +230,7 @@ int Put(RedisModuleCtx* ctx, RedisModuleString* name, RedisModuleString* data,
           cid_ptr, cid_len);
       // TODO(zongheng): check status.
       // LOG_EVERY_N(INFO, 999999999) << "Done";
-      module.sent().insert(sn);
+      // module.sent().insert(sn);
     } else {
       // TODO(zongheng): this case is incompletely handled, i.e. "failure of a
       // middle server".  To handle this the Sent list data structure needs to
@@ -249,6 +251,15 @@ int Put(RedisModuleCtx* ctx, RedisModuleString* name, RedisModuleString* data,
   // if (!module.ActAsHead()) {RedisModule_ReplyWithNull(ctx);}
   // RedisModule_ReplyWithLongLong(ctx,sn);
   return REDISMODULE_OK;
+}
+
+// Find the position of next occurence of "c" starting from "str[pos]".  If not
+// found, return std::string::npos.
+size_t FindFirstOf(char c, size_t pos, const char* str, size_t len) {
+  while (pos < len && str[pos] != c) {
+    ++pos;
+  }
+  return pos < len ? pos : std::string::npos;
 }
 
 }  // namespace
@@ -372,11 +383,13 @@ int MemberPut_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
   if (argc != 4) {
     return RedisModule_WrongArity(ctx);
   }
-  // LOG(INFO) << "MemberPut";
+  DLOG(INFO) << "MemberPut, drop_writes? " << module.DropWrites()
+             << "; act_as_head? " << module.ActAsHead();
   if (module.ActAsHead()) {
     // LOG(INFO) << "MemberPut";
     if (!module.DropWrites()) {
       const long long sn = module.inc_sn();
+      DLOG(INFO) << "Returning assigned sn: " << sn;
       // Return the sequence number
       RedisModule_ReplyWithLongLong(ctx, sn);
 
@@ -389,7 +402,7 @@ int MemberPut_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
       return Put(ctx, argv[1], argv[2], argv[3], sn);
     } else {
       // The store, by contract, is allowed to ignore writes during faults.
-      //
+
       // Returning nothing seems to be a better choice than returning a special
       // value like -1, as in the future we might consider shifting the burden
       // of generating seqnum to the client.  Under that setting, I think the
@@ -405,6 +418,7 @@ int MemberPut_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
       // since a seqnum of 0 appears to be a valid reply to the client.
 
       // return RedisModule_ReplyWithLongLong(ctx, -1);
+      return REDISMODULE_OK;
     }
   } else {
     return RedisModule_ReplyWithError(ctx, "ERR called PUT on non-head node");
@@ -475,6 +489,82 @@ int MemberNoPropPut_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
   return RedisModule_ReplyWithNull(ctx);
 }
 
+// Put a list of keys.  No propagation.
+//
+// This command is used when ME is being added as the new tail of the whole
+// chain -- i.e., fill the contents of ME.  The caller is MemberReplicate.
+//
+// argv[1]: num_entries
+// argv[2]: blob; see MemberReplicate_RedisCommand for its schema
+int MemberNoPropBatchedPut_RedisCommand(RedisModuleCtx* ctx,
+                                        RedisModuleString** argv, int argc) {
+  const double start = timer.NowMicrosecs();
+  if (argc != 3) {
+    return RedisModule_WrongArity(ctx);
+  }
+  long long num_entries = 0;
+  RedisModule_StringToLongLong(argv[1], &num_entries);
+  CHECK(num_entries >= 0);
+
+  size_t blob_size = 0;
+  const char* blob = RedisModule_StringPtrLen(argv[2], &blob_size);
+  LOG(INFO) << "MemberNoPropBatchedPut_RedisCommand, num_entries "
+            << num_entries << " blob_size " << blob_size;
+
+  size_t pos = 0, next_pos = 0;
+  while (num_entries > 0) {
+    --num_entries;
+    // Key.
+    next_pos = FindFirstOf(' ', pos, blob, blob_size);
+    CHECK(next_pos != std::string::npos);
+
+    RedisModuleString* key_rms =
+        RedisModule_CreateString(ctx, blob + pos, next_pos - pos);
+    const std::string key_str(blob + pos, next_pos - pos);
+    RedisModuleKey* key = reinterpret_cast<RedisModuleKey*>(
+        RedisModule_OpenKey(ctx, key_rms, REDISMODULE_WRITE));
+    DLOG(INFO) << key_str;
+
+    // Val.
+    pos = next_pos + 1;
+    next_pos = FindFirstOf(' ', pos, blob, blob_size);
+    CHECK(next_pos != std::string::npos);
+
+    // Mutate redis state.
+    RedisModuleString* val_rms =
+        RedisModule_CreateString(ctx, blob + pos, next_pos - pos);
+    RedisModule_StringSet(key, val_rms);
+
+    RedisModule_FreeString(ctx, val_rms);
+    RedisModule_CloseKey(key);
+    RedisModule_FreeString(ctx, key_rms);
+
+    // Seqnum.
+    pos = next_pos + 1;
+    next_pos = FindFirstOf(' ', pos, blob, blob_size);
+    if (num_entries > 0) {
+      CHECK(next_pos != std::string::npos);
+    } else {
+      CHECK(next_pos == std::string::npos);
+    }
+    const int64_t sn = std::strtoll(blob + pos, nullptr, /*base=*/10);
+    DLOG(INFO) << sn;
+
+    // Chain metadata state.
+    module.sn_to_key()[sn] = std::move(key_str);
+    // TODO(zongheng): this can probably be called once, if we can guarantee
+    // the input blob is sorted by seqnum order.
+    module.record_sn(static_cast<int64_t>(sn));
+
+    // Exit iter.
+    pos = next_pos + 1;
+  }
+
+  const double end = timer.NowMicrosecs();
+  LOG(INFO) << "MemberNoPropBatchedPut took " << (end - start) / 1e3 << " ms";
+  return REDISMODULE_OK;
+}
+
 // Replicate our content to our child.  This command is used when a node is
 // being added as the new tail of the whole chain.
 
@@ -484,19 +574,19 @@ int MemberNoPropPut_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
 // TODO(zongheng): fix the note above; correct iff synchronous...
 int MemberReplicate_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
                                  int argc) {
-  REDISMODULE_NOT_USED(argv);
-  if (argc != 1) {
-    return RedisModule_WrongArity(ctx);
-  }
+  const double start = timer.NowMicrosecs();
+  LOG(INFO) << "In MemberReplicate, argc " << argc;
+  // REDISMODULE_NOT_USED(argv);
+  // if (argc != 1) {
+  //   return RedisModule_WrongArity(ctx);
+  // }
 
-  if (module.child()) {
+  DLOG(INFO) << "has child? " << (module.child() != nullptr);
+  if (module.child() && !module.sn_to_key().empty()) {
     DLOG(INFO) << "Called replicate. sn_to_key size "
                << module.sn_to_key().size();
 
     const size_t num_entries = module.sn_to_key().size();
-    if (num_entries == 0) {
-      return RedisModule_ReplyWithNull(ctx);
-    }
     const std::string num_entries_str = std::to_string(num_entries);
 
     // Schema of blob:
@@ -509,6 +599,9 @@ int MemberReplicate_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
 
     std::stringstream ss;
     int cnt = 0;
+    // NOTE(zongheng): we basically use "sn_to_key" to iterate through
+    // in-memory state for convenience only.  Presumably, we can rely on some
+    // other mechanisms, such as redis' native iterator, to do this.
     for (auto element : module.sn_to_key()) {
       KeyReader reader(ctx, element.second);
       size_t key_size, value_size;
@@ -521,21 +614,22 @@ int MemberReplicate_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
       }
       ++cnt;
     }
-    std::string blob;
-    ss.str(blob);
+    const std::string blob = ss.str();
     LOG(INFO) << "num_entries " << num_entries << " blob.size() "
               << blob.size();
 
-    // NOTE(zongheng): we basically use "sn_to_key" to iterate through in-memory
-    // state for convenience only.  Presumably, we can rely on some other
-    // mechanisms, such as redis' native iterator, to do this.
+    // TODO(zongheng): for now this should probably be synchronous.
     const int status = redisAsyncCommand(
-        module.child(), NULL, NULL, "MEMBER.NO_PROP_BATCHED_PUT %b %b %b %b",
+        module.child(), NULL, NULL, "MEMBER.NO_PROP_BATCHED_PUT %b %b",
         num_entries_str.data(), num_entries_str.size(), blob.data(),
         blob.size());
-    // TODO(zongheng): check status.
+    CHECK(status == REDIS_OK);
   }
-  return RedisModule_ReplyWithNull(ctx);
+  const double end = timer.NowMicrosecs();
+  const int millis = static_cast<int>((end - start) / 1e3);
+  std::cout << "MemberReplicate took " << millis << " ms";
+  LOG(INFO) << "MemberReplicate took " << millis << " ms";
+  return RedisModule_ReplyWithLongLong(ctx, millis);
 }
 
 // Send ack up the chain.
@@ -549,7 +643,7 @@ int MemberAck_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
   std::string sn = ReadString(argv[1]);
   // LOG_EVERY_N(INFO, 999999999)
   //     << "Erasing sequence number " << sn << " from sent list";
-  module.sent().erase(std::stoi(sn));
+  // module.sent().erase(std::stoi(sn));
   if (module.parent()) {
     // LOG_EVERY_N(INFO, 999999999) << "Propagating the ACK up the chain";
     const int status = redisAsyncCommand(module.parent(), NULL, NULL,
@@ -715,7 +809,8 @@ int MemberFlush_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
   CollectFlushableKeys(sn_left, sn_right, sn_ckpt, &flushable_keys);
   DoFlush(ctx, sn_left, sn_right, sn_ckpt, flushable_keys);
 
-  // TODO(zongheng): is this needed?  Do we want ACKs flying in-between servers?
+  // TODO(zongheng): is this needed?  Do we want ACKs flying in-between
+  // servers?
   return RedisModule_ReplyWithNull(ctx);
 }
 
@@ -871,6 +966,12 @@ int RedisModule_OnLoad(RedisModuleCtx* ctx, RedisModuleString** argv,
 
   // No propagation, no ACK, etc.  This is only used for the node addition
   // code path, and is not exposed to clients.
+  if (RedisModule_CreateCommand(ctx, "MEMBER.NO_PROP_BATCHED_PUT",
+                                MemberNoPropBatchedPut_RedisCommand, "write", 1,
+                                1, 1) == REDISMODULE_ERR) {
+    return REDISMODULE_ERR;
+  }
+
   if (RedisModule_CreateCommand(ctx, "MEMBER.NO_PROP_PUT",
                                 MemberNoPropPut_RedisCommand, "write", 1, 1,
                                 1) == REDISMODULE_ERR) {

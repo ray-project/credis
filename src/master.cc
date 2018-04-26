@@ -50,14 +50,24 @@ using Status = leveldb::Status;  // So that it can be easily replaced.
 
 namespace {
 
+// TODO(zongheng): caller of this function doesn't use it correctly.
 // Handle failure for redis module command as caller, hiredis context as callee.
 int ReplyIfFailure(RedisModuleCtx* rm_ctx, redisContext* ctx,
                    redisReply* reply) {
   if (reply == NULL) {
+    CHECK(0);
     return RedisModule_ReplyWithError(rm_ctx, ctx->errstr);
   } else if (reply->type == REDIS_REPLY_ERROR) {
+    CHECK(0);
     return RedisModule_ReplyWithError(rm_ctx, reply->str);
+  } else if (reply->type == REDIS_REPLY_STATUS) {
+    LOG(INFO) << std::string(reply->str, reply->len);
+  } else if (reply->type == REDIS_REPLY_NIL) {
+    // LOG(INFO) << "nil reply";
+  } else if (reply->type == REDIS_REPLY_STRING) {
+    LOG(INFO) << std::string(reply->str, reply->len);
   }
+  return 0;
 }
 
 }  // anonymous namespace
@@ -158,10 +168,15 @@ int MasterAdd_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
 
     if (size > 0) {
       // TODO(pcm): Execute Sent_T requests
-      LOG(INFO) << "Replicating the tail.";
-      redisReply* reply = reinterpret_cast<redisReply*>(
+      LOG(INFO) << "Replicating from old tail to the new tail.";
+      LOG(INFO) << "old tail's port " << found_tail.context->tcp.port;
+      redisReply* reply;
+      reply = reinterpret_cast<redisReply*>(
           redisCommand(found_tail.context, "MEMBER.REPLICATE"));
       ReplyIfFailure(ctx, found_tail.context, reply);
+      CHECK(reply->type == REDIS_REPLY_INTEGER);
+      LOG(INFO) << "Reply of MEMBER.REPLICATE (duration in ms): "
+                << reply->integer;
       freeReplyObject(reply);
 
       LOG(INFO) << "Setting new tail.";

@@ -28,6 +28,28 @@ void DisconnectCallback(const redisAsyncContext* /*context*/, int /*status*/) {
   // "context" will be freed by hiredis.  Quote: "The context object is always
   // freed after the disconnect callback fired."
 }
+void RedisDisconnectCallback(const redisAsyncContext* c, int status) {
+  // if (status == REDIS_OK) {
+  //   // Normal execution, program exit.
+  //   //
+  //   // In this case, this callback seems to fire after glog finishes its
+  //   // own teardown. So LOG(INFO) cannot be used here.
+  //   return;
+  // }
+  LOG(INFO) << "Disconnected redisAsyncContext to remote port "
+            << c->c.tcp.port;
+  LOG(INFO) << "Error: " << c->errstr;
+  LOG(INFO) << "Remote host " << c->c.tcp.host;
+
+  // TODO(zongheng): should we clean up event loop?  should we call
+  // asyncDisconnect()?
+  // redisAsyncDisconnect(c);
+  // c->ev.cleanup(c->ev.data);
+
+  // The context object is always freed after the disconnect callback fired.
+  // When a reconnect is needed, the disconnect callback is a good point to do
+  // so.
+}
 
 redisAsyncContext* AsyncConnect(const std::string& address, int port) {
   redisAsyncContext* c = redisAsyncConnect(address.c_str(), port);
@@ -40,7 +62,9 @@ redisAsyncContext* AsyncConnect(const std::string& address, int port) {
     }
     return NULL;
   }
-  redisAsyncSetDisconnectCallback(c, &DisconnectCallback);
+  // redisAsyncSetDisconnectCallback(c, &DisconnectCallback);
+  CHECK(redisAsyncSetDisconnectCallback(c, &RedisDisconnectCallback) ==
+        REDIS_OK);
   return c;
 }
 

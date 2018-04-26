@@ -142,8 +142,8 @@ void SeqPutCallback(redisAsyncContext* write_context,  // != ack_context.
     // generate arbitrary seqnums, not just nonnegative numbers.  Although,
     // hiredis / redis might have undiscovered issues with a redis module
     // command not replying anything...)
-    CHECK(assigned_seqnum >= writes_completed) << assigned_seqnum << " "
-                                               << writes_completed;
+    CHECK(assigned_seqnum >= writes_completed)
+        << assigned_seqnum << " " << writes_completed;
     last_unacked_seqnum = assigned_seqnum;
     assigned_seqnums.insert(assigned_seqnum);
   }
@@ -206,8 +206,8 @@ void SeqGetCallback(redisAsyncContext* /*context*/, void* r,
   // LOG(INFO) << "reply type " << reply->type << "; issued get "
   //           << last_issued_read_key;
   const std::string actual = std::string(reply->str, reply->len);
-  CHECK(last_issued_read_key == actual) << "; expected " << last_issued_read_key
-                                        << " actual " << actual;
+  CHECK(last_issued_read_key == actual)
+      << "; expected " << last_issued_read_key << " actual " << actual;
   OnCompleteLaunchNext(&reads_timer, &reads_completed, writes_completed);
 }
 

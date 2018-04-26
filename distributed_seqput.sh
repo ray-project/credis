@@ -1,4 +1,5 @@
 #!/bin/bash
+# distributed_seqput.sh
 # Usage: run on client server.
 
 set -x
@@ -42,7 +43,7 @@ maybe_kill() {
         sleep ${NODE_KILL}
         echo 'Performing node removal...'
         ssh -o StrictHostKeyChecking=no ubuntu@${TAIL_SERVER} << EOF
-pkill -9 -f redis-server.*:6370
+pkill -9 -f redis-server.*:6371
 EOF
     fi
 }

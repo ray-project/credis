@@ -34,7 +34,8 @@ function add() {
     taskset 0x1 ./redis/src/redis-server --loadmodule ./build/src/libmember.so ${gcs_mode} --port $port --protected-mode no &> $port.log &
 
     sleep 0.5
-    myip=$(curl ipinfo.io/ip)
+    # myip=$(curl ipinfo.io/ip)
+    myip=$(hostname -i)
     ./redis/src/redis-cli -h ${MASTER_SERVER} -p 6369 MASTER.ADD ${myip} $port
 }
 

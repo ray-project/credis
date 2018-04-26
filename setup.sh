@@ -26,7 +26,8 @@ function setup() {
 
     sleep 2
 
-    myip=$(curl ipinfo.io/ip 2>/dev/null)
+    # myip=$(curl ipinfo.io/ip 2>/dev/null)
+    myip=$(hostname -i)
     for i in $(seq 1 $NUM_NODES); do
       taskset 0x1 \
               ./redis/src/redis-server --loadmodule ./build/src/libmember.so ${gcs_mode} --port $port --protected-mode no &> $port.log &

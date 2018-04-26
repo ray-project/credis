@@ -9,7 +9,7 @@ HEAD_SERVER=${4:-127.0.0.1}
 TAIL_SERVER=${5:-127.0.0.1}
 NODE_ADD=${6:-""}
 NODE_KILL=${7:-""}
-NUM_OPS=${8:-""}
+NUM_OPS=${8:-60000}
 
 eval NODE_ADD=$NODE_ADD
 eval NODE_KILL=$NODE_KILL
@@ -20,7 +20,7 @@ pkill -f credis_seqput_bench
 sleep 4
 
 for i in $(seq 1 $NUM_CLIENTS); do
-  logfile=${NUM_CLIENTS}clients-${i}-chain-${NUM_NODES}node-wr${WRITE_RATIO}.log
+  logfile=${NUM_CLIENTS}clients-${i}-chain_dist-${NUM_NODES}node-wr${WRITE_RATIO}.log
   ./build/src/credis_seqput_bench $NUM_NODES $WRITE_RATIO $HEAD_SERVER $NUM_OPS $TAIL_SERVER >${logfile} 2>&1 &
 done
 

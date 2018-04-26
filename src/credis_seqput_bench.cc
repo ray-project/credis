@@ -366,13 +366,13 @@ int main(int argc, char** argv) {
   if (argc > 2) kWriteRatio = std::stod(argv[2]);
   int write_port = 6370;
   int ack_port = write_port + num_chain_nodes - 1;
-  std::string head_server = "127.0.0.1", tail_server = "127.0.0.1";
+  std::string head_server = "127.0.0.1";
   if (argc > 3) head_server = std::string(argv[3]);
   if (argc > 4) N = std::stoi(argv[4]);
+  std::string tail_server = head_server;  // By default launch on same server.
   if (argc > 5) {
     tail_server = std::string(argv[5]);
     CHECK(num_chain_nodes == 2);
-    ack_port = 6370;
   }
   LOG(INFO) << "num_chain_nodes " << num_chain_nodes << " write_port "
             << write_port << " ack_port " << ack_port << " write_ratio "

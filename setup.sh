@@ -6,6 +6,7 @@ set -ex
 NUM_NODES=${1:-1}
 # If present, use 6369 on this server as the master.
 HEAD_SERVER=${2:-""}
+port=${3:-6370}  # Initial port.
 
 gcs_normal=0
 gcs_ckptonly=1
@@ -21,25 +22,27 @@ function setup() {
     if [ -z "${HEAD_SERVER}" ]; then
       # Master.
       ./redis/src/redis-server --loadmodule ./build/src/libmaster.so --port 6369 --protected-mode no &> master.log &
-      HEAD_SERVER="127.0.0.1"
     fi
 
-    myip=$(curl ipinfo.io/ip)
+    sleep 2
 
-    myip=$(curl ipinfo.io/ip)
-    port=6369
+    myip=$(curl ipinfo.io/ip 2>/dev/null)
     for i in $(seq 1 $NUM_NODES); do
-      port=$(expr $port + 1)
       taskset 0x1 \
               ./redis/src/redis-server --loadmodule ./build/src/libmember.so ${gcs_mode} --port $port --protected-mode no &> $port.log &
 
-      sleep 0.5
-      ./redis/src/redis-cli -h ${HEAD_SERVER} -p 6369 MASTER.ADD ${myip} $port
+      sleep 2
+      if [ -z "${HEAD_SERVER}" ]; then
+        ./redis/src/redis-cli -p 6369 MASTER.ADD ${myip} $port
+      else
+        ./redis/src/redis-cli -h ${HEAD_SERVER} -p 6369 MASTER.ADD ${myip} $port
+      fi
 
 
 # Have chain nodes connect to master.
 #    sleep 0.5
 #    ./redis/src/redis-cli -p $port MEMBER.CONNECT_TO_MASTER 127.0.0.1 6369
+      port=$(expr $port + 1)
     done
     # ./redis/src/redis-cli -p 6370 MONITOR &>monitor-6370.log &
 }

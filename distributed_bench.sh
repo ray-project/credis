@@ -1,5 +1,8 @@
 #!/bin/bash
+
+# distributed_bench.sh
 # Usage: run on client server.
+# TODO: this script assumes 2-node chain, one on each server.
 
 set -ex
 
@@ -18,21 +21,18 @@ for write_ratio in 1 ; do
 
         for num_clients in 1; do
 
+            ssh -o StrictHostKeyChecking=no ubuntu@${HEAD_SERVER} "pkill -f -9 redis-server" || true
+            ssh -o StrictHostKeyChecking=no ubuntu@${TAIL_SERVER} "pkill -f -9 redis-server" || true
+
             # Launch master & head.
             ssh -o StrictHostKeyChecking=no ubuntu@${HEAD_SERVER} << EOF
 cd ~/credis
-pkill -f -9 redis-server
-sleep 2
-./setup.sh $num_nodes
-sleep 2
+./setup.sh 1
 EOF
             # Launch tail.  We pass $HEAD_SERVER to setup.sh, which will skip master creation.
             ssh -o StrictHostKeyChecking=no ubuntu@${TAIL_SERVER} << EOF
 cd ~/credis
-pkill -f -9 redis-server
-sleep 2
-./setup.sh $num_nodes $HEAD_SERVER
-sleep 2
+./setup.sh 1 $HEAD_SERVER 6371
 EOF
 
             sleep 5

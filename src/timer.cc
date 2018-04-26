@@ -8,18 +8,18 @@
 
 #include "glog/logging.h"
 
-Timer Timer::Merge(Timer &timer1, Timer &timer2) {
+Timer Timer::Merge(Timer& timer1, Timer& timer2) {
   Timer t;
-  auto &lat = t.latency_micros();
-  auto &lat1 = timer1.latency_micros();
-  auto &lat2 = timer2.latency_micros();
+  auto& lat = t.latency_micros();
+  auto& lat1 = timer1.latency_micros();
+  auto& lat2 = timer2.latency_micros();
   lat.reserve(lat1.size() + lat2.size());
   lat.insert(lat.end(), lat1.begin(), lat1.end());
   lat.insert(lat.end(), lat2.begin(), lat2.end());
 
-  auto &timestamps = t.begin_timestamps();
-  auto &timestamps1 = timer1.begin_timestamps();
-  auto &timestamps2 = timer2.begin_timestamps();
+  auto& timestamps = t.begin_timestamps();
+  auto& timestamps1 = timer1.begin_timestamps();
+  auto& timestamps2 = timer2.begin_timestamps();
   timestamps.reserve(timestamps1.size() + timestamps2.size());
   timestamps.insert(timestamps.end(), timestamps1.begin(), timestamps1.end());
   timestamps.insert(timestamps.end(), timestamps2.begin(), timestamps2.end());
@@ -48,29 +48,27 @@ double Timer::TimeOpBegin() {
 void Timer::TimeOpEnd(int num_completed) {
   const double now = NowMicrosecs();
   CHECK(latency_micros_.size() == num_completed - 1);
-  CHECK(begin_timestamps_.size() == num_completed)
-      << begin_timestamps_.size() << " " << num_completed;
+  CHECK(begin_timestamps_.size() == num_completed) << begin_timestamps_.size()
+                                                   << " " << num_completed;
   latency_micros_.push_back(now - begin_timestamps_.back());
 }
 
-void Timer::Stats(double *mean, double *std) const {
+void Timer::Stats(double* mean, double* std) const {
   if (latency_micros_.empty()) {
     *mean = 0;
     *std = 0;
     return;
   }
   double sum = 0;
-  for (const double x : latency_micros_)
-    sum += x;
+  for (const double x : latency_micros_) sum += x;
   *mean = sum / latency_micros_.size();
 
   sum = 0;
-  for (const double x : latency_micros_)
-    sum += (x - *mean) * (x - *mean);
+  for (const double x : latency_micros_) sum += (x - *mean) * (x - *mean);
   *std = std::sqrt(sum / latency_micros_.size());
 }
 
-std::string Timer::ReportStats(const std::string &name) const {
+std::string Timer::ReportStats(const std::string& name) const {
   double mean = 0, std = 0;
   Stats(&mean, &std);
 
@@ -90,7 +88,7 @@ void Timer::DropFirst(int n) {
   latency_micros_.erase(latency_micros_.begin(), latency_micros_.begin() + n);
 }
 
-void Timer::WriteToFile(const std::string &path) const {
+void Timer::WriteToFile(const std::string& path) const {
   CHECK(begin_timestamps_.size() == latency_micros_.size())
       << begin_timestamps_.size() << " " << latency_micros_.size();
   std::ofstream ofs(path);
@@ -103,5 +101,5 @@ void Timer::WriteToFile(const std::string &path) const {
   }
 }
 
-std::vector<double> &Timer::begin_timestamps() { return begin_timestamps_; }
-std::vector<double> &Timer::latency_micros() { return latency_micros_; }
+std::vector<double>& Timer::begin_timestamps() { return begin_timestamps_; }
+std::vector<double>& Timer::latency_micros() { return latency_micros_; }

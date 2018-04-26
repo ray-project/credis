@@ -1,42 +1,27 @@
 #!/bin/bash
+# Usage: run on client server.
+
 set -x
 NUM_CLIENTS=${1:-1}
 NUM_NODES=${2:-1}
 WRITE_RATIO=${3:-1}
-SERVER=${4:-127.0.0.1}
-NODE_ADD=${5:-""}
-NODE_KILL=${6:-""}
-NUM_OPS=${7:-""}
+HEAD_SERVER=${4:-127.0.0.1}
+TAIL_SERVER=${5:-127.0.0.1}
+NODE_ADD=${6:-""}
+NODE_KILL=${7:-""}
+NUM_OPS=${8:-""}
 
 eval NODE_ADD=$NODE_ADD
 eval NODE_KILL=$NODE_KILL
 
-# Example usage:
-#
-#   # To launch.
-#   pkill -f redis-server; ./setup.sh 2; make -j;
-#   ./seqput.sh 12 2
-#
-#   # To calculate throughput.
-#   grep throughput client<1-12>.log | cut -d' ' -f 11 | sort -n | tail -n1 | awk '{time=$1/1000} END {print 500000*12/time}'
-
 pkill -f redis_seqput_bench
 pkill -f credis_seqput_bench
-
-ssh -o StrictHostKeyChecking=no ubuntu@${SERVER} << EOF
-cd ~/credis
-pkill -f -9 redis-server
-pkill -f -9 redis-server
-sleep 2
-./setup.sh $NUM_NODES
-sleep 2
-EOF
 
 sleep 4
 
 for i in $(seq 1 $NUM_CLIENTS); do
   logfile=${NUM_CLIENTS}clients-${i}-chain-${NUM_NODES}node-wr${WRITE_RATIO}.log
-  ./build/src/credis_seqput_bench $NUM_NODES $WRITE_RATIO $SERVER $NUM_OPS >${logfile} 2>&1 &
+  ./build/src/credis_seqput_bench $NUM_NODES $WRITE_RATIO $HEAD_SERVER $NUM_OPS $TAIL_SERVER >${logfile} 2>&1 &
 done
 
 maybe_add() {
@@ -44,9 +29,9 @@ maybe_add() {
 if [ ! -z "${NODE_ADD}" ]; then
     sleep ${NODE_ADD}
     echo 'Performing node addition...'
-    ssh -o StrictHostKeyChecking=no ubuntu@${SERVER} << EOF
+    ssh -o StrictHostKeyChecking=no ubuntu@${TAIL_SERVER} << EOF
 cd ~/credis
-bash add.sh
+bash add.sh $HEAD_SERVER
 EOF
 fi
 }
@@ -56,8 +41,8 @@ maybe_kill() {
     if [ ! -z "${NODE_KILL}" ]; then
         sleep ${NODE_KILL}
         echo 'Performing node removal...'
-        ssh -o StrictHostKeyChecking=no ubuntu@${SERVER} << EOF
-pkill -9 -f redis-server.*:6371
+        ssh -o StrictHostKeyChecking=no ubuntu@${TAIL_SERVER} << EOF
+pkill -9 -f redis-server.*:6370
 EOF
     fi
 }
@@ -67,7 +52,7 @@ maybe_kill &
 
 wait
 
-logs="${NUM_CLIENTS}clients-*-chain-${NUM_NODES}node-wr${WRITE_RATIO}.log"
+logs="${NUM_CLIENTS}clients-*-chain_dist-${NUM_NODES}node-wr${WRITE_RATIO}.log"
 outfile="chain-${NUM_NODES}node-wr${WRITE_RATIO}"
 
 # Composite

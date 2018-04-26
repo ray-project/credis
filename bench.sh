@@ -3,6 +3,8 @@ set -ex
 
 SERVER=${1:-127.0.0.1}
 NODE_ADD=${2:-""}
+NODE_KILL=${3:-""}
+N=${4:-""}
 
 pushd build
 make -j
@@ -39,7 +41,7 @@ for write_ratio in 1 ; do
     # done
 
     # Chain
-    for num_nodes in  1; do
+    for num_nodes in  2; do
     #for num_nodes in  2 1; do
         echo 'num_clients throughput latency' > chain-${num_nodes}node-wr${write_ratio}.txt
 
@@ -50,7 +52,7 @@ for write_ratio in 1 ; do
         for num_clients in 1; do
         # for num_clients in $(seq 32 -4 1); do
             sleep 5
-            ./seqput.sh $num_clients $num_nodes $write_ratio $SERVER $NODE_ADD &
+            ./seqput.sh $num_clients $num_nodes $write_ratio $SERVER $NODE_ADD $NODE_KILL $N &
             wait
         done
       #done

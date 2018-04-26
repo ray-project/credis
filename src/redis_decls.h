@@ -22,8 +22,7 @@ extern void REDISMODULE_API_FUNC(RedisModule_CloseKey)(RedisModuleKey* kp);
 extern RedisModuleString* REDISMODULE_API_FUNC(RedisModule_CreateString)(
     RedisModuleCtx* ctx, const char* ptr, size_t len);
 extern char* REDISMODULE_API_FUNC(RedisModule_StringDMA)(RedisModuleKey* key,
-                                                         size_t* len,
-                                                         int mode);
+                                                         size_t* len, int mode);
 extern const char* REDISMODULE_API_FUNC(RedisModule_StringPtrLen)(
     const RedisModuleString* str, size_t* len);
 extern void REDISMODULE_API_FUNC(RedisModule_FreeString)(

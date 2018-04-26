@@ -99,14 +99,14 @@ class RedisChainModule {
   }
   std::string gcs_mode_string() const {
     switch (gcs_mode_) {
-    case GcsMode::kNormal:
-      return "kNormal";
-    case GcsMode::kCkptOnly:
-      return "kCkptOnly";
-    case GcsMode::kCkptFlush:
-      return "kCkptFlush";
-    default:
-      CHECK(false);
+      case GcsMode::kNormal:
+        return "kNormal";
+      case GcsMode::kCkptOnly:
+        return "kCkptOnly";
+      case GcsMode::kCkptFlush:
+        return "kCkptFlush";
+      default:
+        CHECK(false);
     }
   }
 
@@ -122,12 +122,12 @@ class RedisChainModule {
   }
   std::string master_mode_string() const {
     switch (master_mode_) {
-    case MasterMode::kRedis:
-      return "kRedis";
-    case MasterMode::kEtcd:
-      return "kEtcd";
-    default:
-      CHECK(false);
+      case MasterMode::kRedis:
+        return "kRedis";
+      case MasterMode::kEtcd:
+        return "kEtcd";
+      default:
+        CHECK(false);
     }
   }
 
@@ -138,13 +138,13 @@ class RedisChainModule {
         parent_(NULL),
         child_(NULL) {
     switch (master_mode_) {
-    case MasterMode::kRedis:
-      master_client_ = std::unique_ptr<MasterClient>(new RedisMasterClient());
-      break;
-    case MasterMode::kEtcd:
-      CHECK(false) << "Etcd master client is unimplemented";
-    default:
-      CHECK(false) << "Unrecognized master mode " << master_mode_string();
+      case MasterMode::kRedis:
+        master_client_ = std::unique_ptr<MasterClient>(new RedisMasterClient());
+        break;
+      case MasterMode::kEtcd:
+        CHECK(false) << "Etcd master client is unimplemented";
+      default:
+        CHECK(false) << "Unrecognized master mode " << master_mode_string();
     }
   }
 
@@ -153,10 +153,8 @@ class RedisChainModule {
     if (parent_) redisAsyncFree(parent_);
   }
 
-  void Reset(std::string& prev_address,
-             std::string& prev_port,
-             std::string& next_address,
-             std::string& next_port) {
+  void Reset(std::string& prev_address, std::string& prev_port,
+             std::string& next_address, std::string& next_port) {
     prev_address_ = prev_address;
     prev_port_ = prev_port;
     next_address_ = next_address;
@@ -242,18 +240,15 @@ class RedisChainModule {
       std::function<int(RedisModuleCtx*, RedisModuleString**, int)>;
   // Runs "node_func" on every node in the chain; after the tail node has run it
   // too, finalizes the mutation by running "tail_func".
-  using NodeFunc = std::function<int(
-      RedisModuleCtx*, RedisModuleString**, int, RedisModuleString**)>;
+  using NodeFunc = std::function<int(RedisModuleCtx*, RedisModuleString**, int,
+                                     RedisModuleString**)>;
   using TailFunc =
       std::function<int(RedisModuleCtx*, RedisModuleString**, int)>;
 
   // Runs "node_func" on every node in the chain; after the tail node has run it
   // too, finalizes the mutation by running "tail_func".
-  int ChainReplicate(RedisModuleCtx* ctx,
-                     RedisModuleString** argv,
-                     int argc,
-                     NodeFunc node_func,
-                     TailFunc tail_func);
+  int ChainReplicate(RedisModuleCtx* ctx, RedisModuleString** argv, int argc,
+                     NodeFunc node_func, TailFunc tail_func);
 
  private:
   std::string prev_address_;
@@ -302,19 +297,13 @@ class RedisChainModule {
   // Drop writes.  Used when adding a child which acts as the new tail.
   bool drop_writes_ = false;
 
-  int MutateHelper(RedisModuleCtx* ctx,
-                   RedisModuleString** argv,
-                   int argc,
-                   NodeFunc node_func,
-                   TailFunc tail_func,
-                   int sn);
+  int MutateHelper(RedisModuleCtx* ctx, RedisModuleString** argv, int argc,
+                   NodeFunc node_func, TailFunc tail_func, int sn);
 };
 
 int RedisChainModule::MutateHelper(RedisModuleCtx* ctx,
-                                   RedisModuleString** argv,
-                                   int argc,
-                                   NodeFunc node_func,
-                                   TailFunc tail_func,
+                                   RedisModuleString** argv, int argc,
+                                   NodeFunc node_func, TailFunc tail_func,
                                    int sn) {
   // Node function.  Retrieve the mutated key.
   RedisModuleString* redis_key_str = nullptr;
@@ -341,10 +330,8 @@ int RedisChainModule::MutateHelper(RedisModuleCtx* ctx,
 }
 
 int RedisChainModule::ChainReplicate(RedisModuleCtx* ctx,
-                                     RedisModuleString** argv,
-                                     int argc,
-                                     NodeFunc node_func,
-                                     TailFunc tail_func) {
+                                     RedisModuleString** argv, int argc,
+                                     NodeFunc node_func, TailFunc tail_func) {
   CHECK(Role() == RedisChainModule::ChainRole::kSingleton)
       << "ChainReplicate() API supports 1-node mode only for now due to "
          "insufficient "

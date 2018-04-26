@@ -19,9 +19,10 @@ static const int kValueSize = 512;
 
 std::string random_string(size_t length) {
   auto randchar = []() -> char {
-    const char charset[] = "0123456789"
-                           "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                           "abcdefghijklmnopqrstuvwxyz";
+    const char charset[] =
+        "0123456789"
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "abcdefghijklmnopqrstuvwxyz";
     const size_t max_index = (sizeof(charset) - 1);
     return charset[rand() % max_index];
   };
@@ -42,10 +43,16 @@ std::string random_string(size_t length) {
 // If "2" is omitted in the above, by default 1 server is used.
 
 // const int N = 1000000;
-// const int N = 200000;
-const int N = 20000;
 
-aeEventLoop *loop = aeCreateEventLoop(64);
+// ~70 sec.
+int N = 200000;
+
+// const int N = 60000;
+
+// 1-chain ~5sec, 2-chain ~8sec.
+// const int N = 20000;
+
+aeEventLoop* loop = aeCreateEventLoop(64);
 int writes_completed = 0;
 int reads_completed = 0;
 Timer reads_timer, writes_timer;
@@ -57,14 +64,14 @@ double kWriteRatio = 1.0;
 double last_unacked_timestamp = -1;
 int64_t last_unacked_seqnum = -1;
 
-redisAsyncContext *write_context = nullptr;
-redisAsyncContext *read_context = nullptr;
+redisAsyncContext* write_context = nullptr;
+redisAsyncContext* read_context = nullptr;
 
 // Client's bookkeeping for seqnums.
 std::unordered_set<int64_t> assigned_seqnums;
 std::unordered_set<int64_t> acked_seqnums;
 
-RedisClient client;
+std::shared_ptr<RedisClient> client;
 std::shared_ptr<RedisMasterClient> master_client;
 
 // Clients also need UniqueID support.
@@ -72,8 +79,8 @@ std::shared_ptr<RedisMasterClient> master_client;
 const std::string client_id = std::to_string(getpid());
 
 // Forward declaration.
-void SeqPutCallback(redisAsyncContext *, void *, void *);
-void SeqGetCallback(redisAsyncContext *, void *, void *);
+void SeqPutCallback(redisAsyncContext*, void*, void*);
+void SeqGetCallback(redisAsyncContext*, void*, void*);
 void AsyncPut(bool);
 void AsyncGet();
 void AsyncNoReply();
@@ -91,10 +98,9 @@ void AsyncRandomCommand() {
   }
 }
 
-void OnCompleteLaunchNext(Timer *timer, int *cnt, int other_cnt) {
+void OnCompleteLaunchNext(Timer* timer, int* cnt, int other_cnt) {
   // Sometimes an ACK comes back late, just ignore if we're done.
-  if (*cnt + other_cnt >= N)
-    return;
+  if (*cnt + other_cnt >= N) return;
   ++(*cnt);
   timer->TimeOpEnd(*cnt);
   if (*cnt + other_cnt == N) {
@@ -107,8 +113,8 @@ void OnCompleteLaunchNext(Timer *timer, int *cnt, int other_cnt) {
 
 // This callback gets fired whenever the store assigns a seqnum for a Put
 // request.
-void SeqPutCallback(redisAsyncContext *write_context, // != ack_context.
-                    void *r, void *) {
+void SeqPutCallback(redisAsyncContext* write_context,  // != ack_context.
+                    void* r, void*) {
   if (r == nullptr) {
     // It is possible to be given nullptr as the reply.  For instance, a Put
     // that gets ignored with no reply being sent; on program exit, the context
@@ -116,7 +122,7 @@ void SeqPutCallback(redisAsyncContext *write_context, // != ack_context.
     // callback; this is empircally observed.
     return;
   }
-  const redisReply *reply = reinterpret_cast<redisReply *>(r);
+  const redisReply* reply = reinterpret_cast<redisReply*>(r);
   const int64_t assigned_seqnum = reply->integer;
   // LOG(INFO) << "SeqPutCallback " << assigned_seqnum;
   auto it = acked_seqnums.find(assigned_seqnum);
@@ -136,8 +142,8 @@ void SeqPutCallback(redisAsyncContext *write_context, // != ack_context.
     // generate arbitrary seqnums, not just nonnegative numbers.  Although,
     // hiredis / redis might have undiscovered issues with a redis module
     // command not replying anything...)
-    CHECK(assigned_seqnum >= writes_completed)
-        << assigned_seqnum << " " << writes_completed;
+    CHECK(assigned_seqnum >= writes_completed) << assigned_seqnum << " "
+                                               << writes_completed;
     last_unacked_seqnum = assigned_seqnum;
     assigned_seqnums.insert(assigned_seqnum);
   }
@@ -164,8 +170,8 @@ void AsyncPut(bool is_retry) {
   CHECK(status == REDIS_OK);
 }
 
-void AsyncNoReplyCallback(redisAsyncContext *write_context, // != ack_context.
-                          void *r, void *) {
+void AsyncNoReplyCallback(redisAsyncContext* write_context,  // != ack_context.
+                          void* r, void*) {
   CHECK(0) << "Should never be called";
 }
 void AsyncNoReply() {
@@ -189,26 +195,26 @@ void AsyncGet() {
   reads_timer.TimeOpBegin();
   // LOG(INFO) << "GET " << query;
   const int status = redisAsyncCommand(
-      read_context, reinterpret_cast<redisCallbackFn *>(&SeqGetCallback),
+      read_context, reinterpret_cast<redisCallbackFn*>(&SeqGetCallback),
       /*privdata=*/NULL, "GET %b", query.data(), query.size());
   CHECK(status == REDIS_OK);
 }
 
-void SeqGetCallback(redisAsyncContext * /*context*/, void *r,
-                    void * /*privdata*/) {
-  const redisReply *reply = reinterpret_cast<redisReply *>(r);
+void SeqGetCallback(redisAsyncContext* /*context*/, void* r,
+                    void* /*privdata*/) {
+  const redisReply* reply = reinterpret_cast<redisReply*>(r);
   // LOG(INFO) << "reply type " << reply->type << "; issued get "
   //           << last_issued_read_key;
   const std::string actual = std::string(reply->str, reply->len);
-  CHECK(last_issued_read_key == actual)
-      << "; expected " << last_issued_read_key << " actual " << actual;
+  CHECK(last_issued_read_key == actual) << "; expected " << last_issued_read_key
+                                        << " actual " << actual;
   OnCompleteLaunchNext(&reads_timer, &reads_completed, writes_completed);
 }
 
 // This gets fired whenever an ACK from the store comes back.
 void SeqPutAckCallbackHelper(
-    redisAsyncContext *ack_context, // != write_context.
-    void *r, void *privdata, bool issue_first_cmd) {
+    redisAsyncContext* ack_context,  // != write_context.
+    void* r, void* privdata, bool issue_first_cmd) {
   /* Replies to the SUBSCRIBE command have 3 elements. There are two
    * possibilities. Either the reply is the initial acknowledgment of the
    * subscribe command, or it is a message. If it is the initial acknowledgment,
@@ -229,7 +235,7 @@ void SeqPutAckCallbackHelper(
     // for (ack_context == nullptr) test.  Weird.
     return;
   }
-  const redisReply *reply = reinterpret_cast<redisReply *>(r);
+  const redisReply* reply = reinterpret_cast<redisReply*>(r);
 
   // NOTE(zongheng): this check is a hack to see if the msg is a
   // subscribe-success message.
@@ -258,14 +264,14 @@ void SeqPutAckCallbackHelper(
   OnCompleteLaunchNext(&writes_timer, &writes_completed, reads_completed);
 }
 
-void SeqPutAckCallback(redisAsyncContext *ack_context, // != write_context.
-                       void *r, void *privdata) {
+void SeqPutAckCallback(redisAsyncContext* ack_context,  // != write_context.
+                       void* r, void* privdata) {
   return SeqPutAckCallbackHelper(ack_context, r, privdata,
                                  /*issue_first_cmd=*/true);
 }
 void SeqPutAckCallbackAfterRefresh(
-    redisAsyncContext *ack_context, // != write_context.
-    void *r, void *privdata) {
+    redisAsyncContext* ack_context,  // != write_context.
+    void* r, void* privdata) {
   return SeqPutAckCallbackHelper(ack_context, r, privdata,
                                  /*issue_first_cmd=*/false);
 }
@@ -275,9 +281,9 @@ void SeqPutAckCallbackAfterRefresh(
 // RegisterAckCallback(new_tail)
 
 // Fires at this frequency.
-const long long kRetryTimerMillisecs = 100; // For ae's timer.
+const long long kRetryTimerMillisecs = 100;  // For ae's timer.
 // Represents the timeout which if exceeded, we retry last unacked command.
-const double kRetryTimeoutMicrosecs = 1 * 1e5; // 100 ms
+const double kRetryTimeoutMicrosecs = 1 * 1e5;  // 100 ms
 // const double kRetryTimeoutMicrosecs = 1 * 1e6; // 1 sec
 // const double kRetryTimeoutMicrosecs = 5 * 1e6; // 5 sec
 
@@ -291,7 +297,7 @@ const double kRefreshTailPutThresholdMicrosecs = 2 * kRetryTimeoutMicrosecs;
 
 // TODO(zongheng): what's to prevent us from reconnecting to the tail in a loop,
 // except by luck?
-int RefreshTailTimer(aeEventLoop *loop, long long /*timer_id*/, void *) {
+int RefreshTailTimer(aeEventLoop* loop, long long /*timer_id*/, void*) {
   const double now_us = writes_timer.NowMicrosecs();
   const double diff = now_us - last_unacked_timestamp;
   if (last_unacked_timestamp == -1 ||
@@ -311,12 +317,12 @@ int RefreshTailTimer(aeEventLoop *loop, long long /*timer_id*/, void *) {
   CHECK(master_client->Tail(&tail_address, &tail_port).ok());
   DLOG(INFO) << "Issuing ReconnectAckContext()";
   CHECK(client
-            .ReconnectAckContext(
+            ->ReconnectAckContext(
                 tail_address, tail_port,
-                static_cast<redisCallbackFn *>(&SeqPutAckCallbackAfterRefresh))
+                static_cast<redisCallbackFn*>(&SeqPutAckCallbackAfterRefresh))
             .ok());
   DLOG(INFO) << "AckContext reconnected, port: "
-             << client.read_context()->c.tcp.port;
+             << client->read_context()->c.tcp.port;
 
   // Fire again at this distance from now.
   // We choose to lengthen this window to not uncessarily refresh the tail too
@@ -325,7 +331,7 @@ int RefreshTailTimer(aeEventLoop *loop, long long /*timer_id*/, void *) {
   return kRefreshTailTimerMillisecs * 2;
 }
 
-int RetryPutTimer(aeEventLoop *loop, long long /*timer_id*/, void *) {
+int RetryPutTimer(aeEventLoop* loop, long long /*timer_id*/, void*) {
   const double now_us = writes_timer.NowMicrosecs();
   const double diff = now_us - last_unacked_timestamp;
   if (last_unacked_timestamp > 0 && diff > kRetryTimeoutMicrosecs) {
@@ -347,30 +353,41 @@ int RetryPutTimer(aeEventLoop *loop, long long /*timer_id*/, void *) {
 
     // return kRetryTimeoutMicrosecs;
   }
-  return kRetryTimerMillisecs; // Fire at this distance from now.
+  return kRetryTimerMillisecs;  // Fire at this distance from now.
 }
 
-int main(int argc, char **argv) {
-  // Parse.
+int main(int argc, char** argv) {
+  // Args:
+  //   num_chain_nodes kWriteRatio head_server N tail_server
+  // All optional.
+
   int num_chain_nodes = 1;
-  if (argc > 1)
-    num_chain_nodes = std::stoi(argv[1]);
-  if (argc > 2)
-    kWriteRatio = std::stod(argv[2]);
-  std::string server = "127.0.0.1";
-  if (argc > 3)
-    server = std::string(argv[3]);
-  // Set up "write_port" and "ack_port".
-  const int write_port = 6370;
-  const int ack_port = write_port + num_chain_nodes - 1;
+  if (argc > 1) num_chain_nodes = std::stoi(argv[1]);
+  if (argc > 2) kWriteRatio = std::stod(argv[2]);
+  int write_port = 6370;
+  int ack_port = write_port + num_chain_nodes - 1;
+  std::string head_server = "127.0.0.1", tail_server = "127.0.0.1";
+  if (argc > 3) head_server = std::string(argv[3]);
+  if (argc > 4) N = std::stoi(argv[4]);
+  if (argc > 5) {
+    tail_server = std::string(argv[5]);
+    CHECK(num_chain_nodes == 2);
+    ack_port = 6370;
+  }
   LOG(INFO) << "num_chain_nodes " << num_chain_nodes << " write_port "
             << write_port << " ack_port " << ack_port << " write_ratio "
-            << kWriteRatio << " server " << server;
+            << kWriteRatio << " head_server " << head_server << " tail_server "
+            << tail_server;
 
-  CHECK(client.Connect(server, write_port, ack_port).ok());
-  CHECK(client.AttachToEventLoop(loop).ok());
+  client = std::make_shared<RedisClient>();
+
+  CHECK(client->ConnectHead(head_server, write_port).ok());
+  CHECK(client->ConnectTail(tail_server, ack_port).ok());
+
+  CHECK(client->AttachToEventLoop(loop).ok());
   master_client = std::make_shared<RedisMasterClient>();
-  CHECK(master_client->Connect(server, 6369).ok()); // TODO(zongheng): arg.
+  CHECK(
+      master_client->Connect(head_server, 6369).ok());  // TODO(zongheng): arg.
 
   // NOTE(zongheng): RegisterAckCallback() subscribes ME to a channel.
   // SeqPutAckCallback is responsible for listening for:
@@ -386,12 +403,12 @@ int main(int argc, char **argv) {
   // On receipt of (2): it issues another call to AsyncRandomCommand().  Hence
   // this client program is sequential.
   CHECK(client
-            .RegisterAckCallback(
-                static_cast<redisCallbackFn *>(&SeqPutAckCallback))
+            ->RegisterAckCallback(
+                static_cast<redisCallbackFn*>(&SeqPutAckCallback))
             .ok());
 
-  write_context = client.write_context();
-  read_context = client.read_context();
+  write_context = client->write_context();
+  read_context = client->read_context();
 
   // Timings related.
   reads_timer.ExpectOps(N);

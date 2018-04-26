@@ -6,8 +6,8 @@
 
 // For sequential queries only (i.e., launch next after current finishes).
 class Timer {
-public:
-  static Timer Merge(Timer &timer1, Timer &timer2);
+ public:
+  static Timer Merge(Timer& timer1, Timer& timer2);
   double NowMicrosecs() const;
 
   void ExpectOps(int N);
@@ -15,19 +15,19 @@ public:
   double TimeOpBegin();
   void TimeOpEnd(int num_completed);
 
-  void Stats(double *mean, double *std) const;
-  std::string ReportStats(const std::string &name) const;
+  void Stats(double* mean, double* std) const;
+  std::string ReportStats(const std::string& name) const;
 
   void DropFirst(int n);
 
-  void WriteToFile(const std::string &path) const;
+  void WriteToFile(const std::string& path) const;
 
-  std::vector<double> &begin_timestamps();
-  std::vector<double> &latency_micros();
+  std::vector<double>& begin_timestamps();
+  std::vector<double>& latency_micros();
 
-private:
+ private:
   std::vector<double> begin_timestamps_;
   std::vector<double> latency_micros_;
 };
 
-#endif // CREDIS_TIMER_
+#endif  // CREDIS_TIMER_

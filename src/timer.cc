@@ -8,6 +8,21 @@
 
 #include "glog/logging.h"
 
+void Timer::ToFile(const std::string& path, bool is_append) const {
+  CHECK(begin_timestamps_.size() == latency_micros_.size())
+      << begin_timestamps_.size() << " " << latency_micros_.size();
+  std::ios_base::openmode mode = std::ios_base::out;
+  if (is_append) mode = std::ios_base::app;
+  std::ofstream ofs(path, mode);
+
+  if (!is_append) ofs << "begin_timestamp_us,latency_us" << std::endl;
+
+  for (int i = 0; i < begin_timestamps_.size(); ++i) {
+    ofs << static_cast<int64_t>(begin_timestamps_[i]) << ","
+        << latency_micros_[i] << std::endl;
+  }
+}
+
 Timer Timer::Merge(Timer& timer1, Timer& timer2) {
   Timer t;
   auto& lat = t.latency_micros();
@@ -48,8 +63,8 @@ double Timer::TimeOpBegin() {
 void Timer::TimeOpEnd(int num_completed) {
   const double now = NowMicrosecs();
   CHECK(latency_micros_.size() == num_completed - 1);
-  CHECK(begin_timestamps_.size() == num_completed) << begin_timestamps_.size()
-                                                   << " " << num_completed;
+  CHECK(begin_timestamps_.size() == num_completed)
+      << begin_timestamps_.size() << " " << num_completed;
   latency_micros_.push_back(now - begin_timestamps_.back());
 }
 
@@ -89,16 +104,10 @@ void Timer::DropFirst(int n) {
 }
 
 void Timer::WriteToFile(const std::string& path) const {
-  CHECK(begin_timestamps_.size() == latency_micros_.size())
-      << begin_timestamps_.size() << " " << latency_micros_.size();
-  std::ofstream ofs(path);
-
-  ofs << "begin_timestamp_us,latency_us" << std::endl;
-
-  for (int i = 0; i < begin_timestamps_.size(); ++i) {
-    ofs << static_cast<int64_t>(begin_timestamps_[i]) << ","
-        << latency_micros_[i] << std::endl;
-  }
+  ToFile(path, /*is_append=*/false);
+}
+void Timer::AppendToFile(const std::string& path) const {
+  ToFile(path, /*is_append=*/true);
 }
 
 std::vector<double>& Timer::begin_timestamps() { return begin_timestamps_; }

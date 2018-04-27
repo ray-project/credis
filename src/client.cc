@@ -3,6 +3,16 @@
 #include <cstring>
 #include <iostream>
 
+#define ReturnNotOk(s) \
+  if (!s.ok()) return s;
+
+// namespace {
+// Status ReturnNotOk(const Status& s) {
+//   if (!s.ok()) return s;
+//   // Pass through;
+// }
+// }  // namespace
+
 // This is a global redis callback which will be registered for every
 // asynchronous redis call. It dispatches the appropriate callback
 // that was registered with the RedisCallbackManager.
@@ -99,11 +109,14 @@ Status ConnectContext(const std::string& address, int port,
   if (ctx == nullptr || ctx->err) {
     LOG(ERROR) << "Could not establish connection to redis " << address << ":"
                << port;
-    return Status::IOError("ERR");
+    return Status::IOError("Could not establish connection to redis address ",
+                           address);
   }
-  CHECK(redisAsyncSetDisconnectCallback(
-            ctx, static_cast<redisDisconnectCallback*>(
-                     RedisDisconnectCallback)) == REDIS_OK);
+  if (redisAsyncSetDisconnectCallback(
+          ctx, static_cast<redisDisconnectCallback*>(
+                   RedisDisconnectCallback)) != REDIS_OK) {
+    return Status::IOError("Could not register disconnect callback");
+  }
   *context = ctx;
   return Status::OK();
 }
@@ -157,13 +170,18 @@ Status RedisClient::ReconnectAckContext(const std::string& address, int port,
 
 Status RedisClient::ConnectHead(const std::string& address, int port) {
   CHECK(write_context_ == nullptr);
-  CHECK(ConnectContext(address, port, &write_context_).ok());
+  ReturnNotOk(ConnectContext(address, port, &write_context_));
+  return Status::OK();
 }
+
 Status RedisClient::ConnectTail(const std::string& address, int port) {
   CHECK(read_context_ == nullptr);
   CHECK(ack_subscribe_context_ == nullptr);
-  CHECK(ConnectContext(address, port, &read_context_).ok());
-  CHECK(ConnectContext(address, port, &ack_subscribe_context_).ok());
+  ReturnNotOk(ConnectContext(address, port, &read_context_));
+  ReturnNotOk(ConnectContext(address, port, &ack_subscribe_context_));
+  // CHECK(ConnectContext(address, port, &read_context_).ok());
+  // CHECK(ConnectContext(address, port, &ack_subscribe_context_).ok());
+  return Status::OK();
 }
 
 Status RedisClient::Connect(const std::string& address, int port) {

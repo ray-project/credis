@@ -71,8 +71,8 @@ redisAsyncContext* read_context = nullptr;
 std::unordered_set<int64_t> assigned_seqnums;
 std::unordered_set<int64_t> acked_seqnums;
 
-std::shared_ptr<RedisClient> client;
-std::shared_ptr<RedisMasterClient> master_client;
+std::shared_ptr<RedisClient> client = nullptr;
+std::shared_ptr<RedisMasterClient> master_client = nullptr;
 
 // Clients also need UniqueID support.
 // TODO(zongheng): implement this properly via uuid, currently it's pid.
@@ -358,7 +358,7 @@ int RetryPutTimer(aeEventLoop* loop, long long /*timer_id*/, void*) {
 
 int main(int argc, char** argv) {
   // Args:
-  //   num_chain_nodes kWriteRatio head_server N tail_server
+  //   num_chain_nodes kWriteRatio head_server N tail_server csv_file
   // All optional.
 
   int num_chain_nodes = 1;
@@ -374,15 +374,32 @@ int main(int argc, char** argv) {
     tail_server = std::string(argv[5]);
     CHECK(num_chain_nodes == 2);
   }
+  // const int pid = getpid();
+  std::string csv_pathname = "client-" + client_id + "-" +
+                             std::to_string(num_chain_nodes) + "nodes.csv";
+  if (argc > 6) {
+    LOG(INFO) << "argv[6]: " << argv[6];
+    csv_pathname = std::string(argv[6]);
+  }
+
   LOG(INFO) << "num_chain_nodes " << num_chain_nodes << " write_port "
             << write_port << " ack_port " << ack_port << " write_ratio "
             << kWriteRatio << " head_server " << head_server << " tail_server "
             << tail_server;
 
   client = std::make_shared<RedisClient>();
+  CHECK(client->write_context() == nullptr);
+  CHECK(client->read_context() == nullptr);
 
   CHECK(client->ConnectHead(head_server, write_port).ok());
   CHECK(client->ConnectTail(tail_server, ack_port).ok());
+
+  // leveldb::Status s;
+  // s = client->ConnectHead(head_server, write_port);
+  // CHECK(s.ok()) << s.ToString();
+  // CHECK(client->read_context() == nullptr);
+  // s = client->ConnectTail(tail_server, ack_port);
+  // CHECK(s.ok()) << s.ToString();
 
   CHECK(client->AttachToEventLoop(loop).ok());
   master_client = std::make_shared<RedisMasterClient>();
@@ -446,10 +463,11 @@ int main(int argc, char** argv) {
   double writes_mean = 0, writes_std = 0;
   writes_timer.Stats(&writes_mean, &writes_std);
 
-  const int pid = getpid();
-  const std::string pathname = "client-" + std::to_string(pid) + "-" +
-                               std::to_string(num_chain_nodes) + "nodes.csv";
-  merged.WriteToFile(pathname);
+  if (argc > 6) {
+    merged.AppendToFile(csv_pathname);
+  } else {
+    merged.WriteToFile(csv_pathname);
+  }
 
   LOG(INFO) << "throughput " << N * 1e6 / latency_us
             << " ops/s, total duration (ms) " << latency_us / 1e3 << ", num "
@@ -470,6 +488,6 @@ int main(int argc, char** argv) {
   LOG(INFO) << "reads_lat (us) mean " << reads_mean << " std " << reads_std;
   LOG(INFO) << "writes_lat (us) mean " << writes_mean << " std " << writes_std;
 
-  LOG(INFO) << "pid " << pid;
+  LOG(INFO) << "pid " << client_id;
   return 0;
 }

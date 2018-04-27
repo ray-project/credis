@@ -12,44 +12,52 @@ NODE_ADD=${6:-""}
 NODE_KILL=${7:-""}
 NUM_OPS=${8:-60000}
 
-eval NODE_ADD=$NODE_ADD
-eval NODE_KILL=$NODE_KILL
-
 pkill -f redis_seqput_bench
 pkill -f credis_seqput_bench
 
 sleep 4
 
+agg_csv=${NUM_CLIENTS}clients-chain_dist-${NUM_NODES}node-wr${WRITE_RATIO}-$(date +%s).csv
+echo 'begin_timestamp_us,latency_us' > ${agg_csv}
 for i in $(seq 1 $NUM_CLIENTS); do
   logfile=${NUM_CLIENTS}clients-${i}-chain_dist-${NUM_NODES}node-wr${WRITE_RATIO}.log
-  ./build/src/credis_seqput_bench $NUM_NODES $WRITE_RATIO $HEAD_SERVER $NUM_OPS $TAIL_SERVER >${logfile} 2>&1 &
+  ./build/src/credis_seqput_bench $NUM_NODES $WRITE_RATIO $HEAD_SERVER $NUM_OPS $TAIL_SERVER ${agg_csv} >${logfile} 2>&1 &
 done
 
-maybe_add() {
-# Optionally, do node addition.
-if [ ! -z "${NODE_ADD}" ]; then
-    sleep ${NODE_ADD}
-    echo 'Performing node addition...'
-    ssh -o StrictHostKeyChecking=no ubuntu@${TAIL_SERVER} << EOF
-cd ~/credis
-bash add.sh $HEAD_SERVER
-EOF
-fi
-}
-
 maybe_kill() {
+    wait=$1
+    eval wait=$wait
     # Optionally, do node removal.
-    if [ ! -z "${NODE_KILL}" ]; then
-        sleep ${NODE_KILL}
+    if [ ! -z "${wait}" ]; then
+        sleep ${wait}
         echo 'Performing node removal...'
         ssh -o StrictHostKeyChecking=no ubuntu@${TAIL_SERVER} << EOF
-pkill -9 -f redis-server.*:6371
+pkill -f redis-server.*:6371
 EOF
     fi
 }
 
-maybe_add &
-maybe_kill &
+maybe_add() {
+    wait=$1
+    eval wait=$wait
+# Optionally, do node addition.
+if [ ! -z "${wait}" ]; then
+    sleep ${wait}
+    echo 'Performing node addition...'
+    ssh -o StrictHostKeyChecking=no ubuntu@${TAIL_SERVER} << EOF
+cd ~/credis
+bash add.sh $HEAD_SERVER 6371
+EOF
+fi
+}
+
+maybe_kill ${NODE_KILL} &
+maybe_add ${NODE_ADD} &
+
+# NODE_KILL2=$((NODE_KILL * 3))
+# NODE_ADD2=$((NODE_ADD * 2))
+# maybe_kill ${NODE_KILL2} &
+# maybe_add ${NODE_ADD2} &
 
 wait
 

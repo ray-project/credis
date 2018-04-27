@@ -4,6 +4,7 @@
 set -x
 
 MASTER_SERVER=${1:-127.0.0.1}
+port=${2:-6371}  # Initial port to start trying.
 
 gcs_normal=0
 gcs_ckptonly=1
@@ -20,7 +21,6 @@ function add() {
     # ./redis/src/redis-server --loadmodule ./build/src/libmaster.so --port 6369 &> master.log &
 
     # Assume by default the master & 1 node are already running, at 6369, 6370, respectively.
-    port=6370
     while true; do
         result=$(pgrep -a redis-server | grep $port)
         if [ -z "${result}" ]; then

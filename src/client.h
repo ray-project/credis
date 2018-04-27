@@ -71,12 +71,12 @@ class RedisClient {
  private:
   // Cache user-supplied loop in case we need to attach new/reconnected contexts
   // to the loop.  Not owned.
-  aeEventLoop* loop_;
+  aeEventLoop* loop_ = nullptr;
 
-  redisContext* context_;
-  redisAsyncContext* write_context_;
-  redisAsyncContext* read_context_;
-  redisAsyncContext* ack_subscribe_context_;
+  redisContext* context_ = nullptr;
+  redisAsyncContext* write_context_ = nullptr;
+  redisAsyncContext* read_context_ = nullptr;
+  redisAsyncContext* ack_subscribe_context_ = nullptr;
 };
 
 #endif  // CREDIS_CLIENT_H_

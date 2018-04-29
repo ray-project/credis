@@ -98,6 +98,7 @@ std::string Timer::ReportStats(const std::string& name) const {
 }
 
 void Timer::DropFirst(int n) {
+  if (begin_timestamps_.size() < n) return;
   begin_timestamps_.erase(begin_timestamps_.begin(),
                           begin_timestamps_.begin() + n);
   latency_micros_.erase(latency_micros_.begin(), latency_micros_.begin() + n);

@@ -202,7 +202,7 @@ void AsyncGet() {
   reads_timer.TimeOpBegin();
   const int status = redisAsyncCommand(
       read_context, reinterpret_cast<redisCallbackFn*>(&SeqGetCallback),
-      /*privdata=*/NULL, "GET %b", last_issued_read_key.data(),
+      /*privdata=*/NULL, "READ %b", last_issued_read_key.data(),
       last_issued_read_key.size());
   CHECK(status == REDIS_OK);
 }

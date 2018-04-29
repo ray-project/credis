@@ -19,6 +19,8 @@ sleep 4
 
 agg_csv=${NUM_CLIENTS}clients-chain_dist-${NUM_NODES}node-wr${WRITE_RATIO}-$(date +%s).csv
 echo 'begin_timestamp_us,latency_us' > ${agg_csv}
+echo 'begin_timestamp_us,latency_us' > reads-${agg_csv}
+echo 'begin_timestamp_us,latency_us' > writes-${agg_csv}
 for i in $(seq 1 $NUM_CLIENTS); do
   logfile=${NUM_CLIENTS}clients-${i}-chain_dist-${NUM_NODES}node-wr${WRITE_RATIO}.log
   ./build/src/credis_seqput_bench $NUM_NODES $WRITE_RATIO $HEAD_SERVER $NUM_OPS $TAIL_SERVER ${agg_csv} >${logfile} 2>&1 &

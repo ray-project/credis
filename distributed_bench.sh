@@ -14,8 +14,8 @@ N=${5:-""}
 
 pushd build; make -j; popd
 
-for write_ratio in 0.5 ; do
-    # for write_ratio in 1 ; do
+# for write_ratio in 0.5 ; do
+    for write_ratio in 1 ; do
     # Chain
     for num_nodes in  2; do
         echo 'num_clients throughput latency' > chain-${num_nodes}node-wr${write_ratio}.txt

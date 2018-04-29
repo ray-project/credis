@@ -858,7 +858,7 @@ int Read_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv, int argc) {
     size_t size = 0;
     const char* value = reader.value(&size);
     return RedisModule_ReplyWithStringBuffer(ctx, value, size);
-  } else {
+  } else if (module.gcs_mode() > RedisChainModule::GcsMode::kNormal) {
     // Fall back to checkpoint file.
     leveldb::DB* ckpt;
     Status s = module.OpenCheckpoint(&ckpt);
@@ -874,6 +874,9 @@ int Read_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv, int argc) {
     }
     HandleNonOk(ctx, s);
     return RedisModule_ReplyWithStringBuffer(ctx, value.data(), value.size());
+  } else {
+    // No checkpoint file, so return nil signaling not found.
+    return RedisModule_ReplyWithNull(ctx);
   }
 }
 

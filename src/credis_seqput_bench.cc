@@ -57,12 +57,16 @@ int writes_completed = 0;
 int reads_completed = 0;
 Timer reads_timer, writes_timer;
 std::string last_issued_read_key;
+int last_issued_read_key_index;
 // Randomness.
 std::default_random_engine re;
 double kWriteRatio = 1.0;
 
+// LastUnacked.
+// TODO(zongheng): should probably be a struct.
 double last_unacked_timestamp = -1;
 int64_t last_unacked_seqnum = -1;
+std::string last_unacked_key, last_unacked_value;
 
 redisAsyncContext* write_context = nullptr;
 redisAsyncContext* read_context = nullptr;
@@ -77,6 +81,10 @@ std::shared_ptr<RedisMasterClient> master_client = nullptr;
 // Clients also need UniqueID support.
 // TODO(zongheng): implement this properly via uuid, currently it's pid.
 const std::string client_id = std::to_string(getpid());
+
+// Record this so that we issue valid reads.  Otherwise we don't need it.
+std::vector<std::string> acked_keys;
+std::vector<std::string> acked_values;
 
 // Forward declaration.
 void SeqPutCallback(redisAsyncContext*, void*, void*);
@@ -98,11 +106,17 @@ void AsyncRandomCommand() {
   }
 }
 
-void OnCompleteLaunchNext(Timer* timer, int* cnt, int other_cnt) {
+void OnCompleteLaunchNext(Timer* timer, int* cnt, int other_cnt,
+                          bool is_write) {
   // Sometimes an ACK comes back late, just ignore if we're done.
   if (*cnt + other_cnt >= N) return;
   ++(*cnt);
   timer->TimeOpEnd(*cnt);
+  if (is_write) {
+    acked_keys.push_back(last_unacked_key);
+    acked_values.push_back(last_unacked_value);
+    // TODO(zongheng): we don't need to change last_unacked_{k,v} do we?
+  }
   if (*cnt + other_cnt == N) {
     aeStop(loop);
     return;
@@ -130,7 +144,8 @@ void SeqPutCallback(redisAsyncContext* write_context,  // != ack_context.
     acked_seqnums.erase(it);
     last_unacked_timestamp = -1;
     last_unacked_seqnum = -1;
-    OnCompleteLaunchNext(&writes_timer, &writes_completed, reads_completed);
+    OnCompleteLaunchNext(&writes_timer, &writes_completed, reads_completed,
+                         /*is_write=*/true);
   } else {
     DLOG(INFO) << "assigning last_unacked_seqnum with value "
                << assigned_seqnum;
@@ -149,24 +164,17 @@ void SeqPutCallback(redisAsyncContext* write_context,  // != ack_context.
   }
 }
 
-// Put(n -> n), for n == writes_completed.
 void AsyncPut(bool is_retry) {
-  // i -> i.
-  const std::string data = std::to_string(writes_completed);
-
-  const std::string key = random_string(kKeySize);
-  const std::string value = random_string(kValueSize);
-
-  // LOG(INFO) << "PUT " << data;
   if (!is_retry) {
+    last_unacked_key = random_string(kKeySize);
+    last_unacked_value = random_string(kValueSize);
     last_unacked_timestamp = writes_timer.TimeOpBegin();
   }
   const int status = redisAsyncCommand(
       write_context, &SeqPutCallback,
-      /*privdata=*/NULL, "MEMBER.PUT %b %b %b", key.data(), key.size(),
-      value.data(), value.size(), client_id.data(), client_id.size());
-  // /*privdata=*/NULL, "MEMBER.PUT %b %b %b", data.data(), data.size(),
-  //   data.data(), data.size(), client_id.data(), client_id.size());
+      /*privdata=*/NULL, "MEMBER.PUT %b %b %b", last_unacked_key.data(),
+      last_unacked_key.size(), last_unacked_value.data(),
+      last_unacked_value.size(), client_id.data(), client_id.size());
   CHECK(status == REDIS_OK);
 }
 
@@ -182,21 +190,20 @@ void AsyncNoReply() {
   LOG(INFO) << "Done issuing AsyncNoReply";
 }
 
-// Get(i), for a random i in [0, writes_completed).
 void AsyncGet() {
   CHECK(writes_completed > 0);
+
   std::uniform_int_distribution<> unif_int(0, writes_completed - 1);
   const int r = unif_int(re);
-  // LOG(INFO) << "random int " << r << " writes_completed " <<
-  // writes_completed;
-  const std::string query = std::to_string(r);
-  last_issued_read_key = query;
-
+  CHECK(r < acked_keys.size()) << "writes_completed " << writes_completed
+                               << " acked_keys.size() " << acked_keys.size();
+  last_issued_read_key_index = r;
+  last_issued_read_key = acked_keys[r];
   reads_timer.TimeOpBegin();
-  // LOG(INFO) << "GET " << query;
   const int status = redisAsyncCommand(
       read_context, reinterpret_cast<redisCallbackFn*>(&SeqGetCallback),
-      /*privdata=*/NULL, "GET %b", query.data(), query.size());
+      /*privdata=*/NULL, "GET %b", last_issued_read_key.data(),
+      last_issued_read_key.size());
   CHECK(status == REDIS_OK);
 }
 
@@ -206,9 +213,11 @@ void SeqGetCallback(redisAsyncContext* /*context*/, void* r,
   // LOG(INFO) << "reply type " << reply->type << "; issued get "
   //           << last_issued_read_key;
   const std::string actual = std::string(reply->str, reply->len);
-  CHECK(last_issued_read_key == actual)
-      << "; expected " << last_issued_read_key << " actual " << actual;
-  OnCompleteLaunchNext(&reads_timer, &reads_completed, writes_completed);
+  CHECK(acked_values[last_issued_read_key_index] == actual);
+  // CHECK(last_issued_read_key == actual)
+  //     << "; expected " << last_issued_read_key << " actual " << actual;
+  OnCompleteLaunchNext(&reads_timer, &reads_completed, writes_completed,
+                       /*is_write=*/false);
 }
 
 // This gets fired whenever an ACK from the store comes back.
@@ -261,7 +270,8 @@ void SeqPutAckCallbackHelper(
   assigned_seqnums.erase(it);
   last_unacked_timestamp = -1;
   last_unacked_seqnum = -1;
-  OnCompleteLaunchNext(&writes_timer, &writes_completed, reads_completed);
+  OnCompleteLaunchNext(&writes_timer, &writes_completed, reads_completed,
+                       /*is_write=*/true);
 }
 
 void SeqPutAckCallback(redisAsyncContext* ack_context,  // != write_context.
@@ -275,10 +285,6 @@ void SeqPutAckCallbackAfterRefresh(
   return SeqPutAckCallbackHelper(ack_context, r, privdata,
                                  /*issue_first_cmd=*/false);
 }
-
-// TODO(zongheng): if same "writes_completed" stalled for more than X times,
-// e.g. 3, trigger refresh tail -> ConnectContext(new_tail_port) ->
-// RegisterAckCallback(new_tail)
 
 // Fires at this frequency.
 const long long kRetryTimerMillisecs = 100;  // For ae's timer.
@@ -328,7 +334,11 @@ int RefreshTailTimer(aeEventLoop* loop, long long /*timer_id*/, void*) {
   // We choose to lengthen this window to not uncessarily refresh the tail too
   // frequently.  Using 1x results in one (observed) extra refresh in some
   // setting.
-  return kRefreshTailTimerMillisecs * 2;
+  // TODO(zongheng): we really need some randomization / exponential backoff
+  // here.
+  return 2000;  // 2 secs
+  // return kRefreshTailTimerMillisecs * 10;
+  // return kRefreshTailTimerMillisecs * 2;
 }
 
 int RetryPutTimer(aeEventLoop* loop, long long /*timer_id*/, void*) {
@@ -387,10 +397,13 @@ int main(int argc, char** argv) {
             << kWriteRatio << " head_server " << head_server << " tail_server "
             << tail_server;
 
+  // Prepare.
+  acked_keys.reserve(N);
+  acked_values.reserve(N);
+
   client = std::make_shared<RedisClient>();
   CHECK(client->write_context() == nullptr);
   CHECK(client->read_context() == nullptr);
-
   CHECK(client->ConnectHead(head_server, write_port).ok());
   CHECK(client->ConnectTail(tail_server, ack_port).ok());
 
@@ -439,13 +452,11 @@ int main(int argc, char** argv) {
 
   std::this_thread::sleep_for(std::chrono::seconds(1));
   LOG(INFO) << "starting bench";
+
   auto start = std::chrono::system_clock::now();
-
-  // LOG(INFO) << "start loop";
   aeMain(loop);
-  // LOG(INFO) << "end loop";
-
   auto end = std::chrono::system_clock::now();
+
   CHECK(writes_completed + reads_completed == N);
   LOG(INFO) << "ending bench";
   const int64_t latency_us =
@@ -453,8 +464,20 @@ int main(int argc, char** argv) {
           .count();
 
   // Timings related.
-  Timer merged = Timer::Merge(reads_timer, writes_timer);
-  merged.DropFirst(10);
+  reads_timer.DropFirst(50);
+  writes_timer.DropFirst(50);
+  const Timer merged = Timer::Merge(reads_timer, writes_timer);
+
+  if (argc > 6) {
+    // Concurrent clients.
+    merged.AppendToFile(csv_pathname);
+    reads_timer.AppendToFile("reads-" + csv_pathname);
+    writes_timer.AppendToFile("writes-" + csv_pathname);
+  } else {
+    merged.WriteToFile(csv_pathname);
+    reads_timer.WriteToFile("reads-" + csv_pathname);
+    writes_timer.WriteToFile("writes-" + csv_pathname);
+  }
 
   double composite_mean = 0, composite_std = 0;
   merged.Stats(&composite_mean, &composite_std);
@@ -462,13 +485,6 @@ int main(int argc, char** argv) {
   reads_timer.Stats(&reads_mean, &reads_std);
   double writes_mean = 0, writes_std = 0;
   writes_timer.Stats(&writes_mean, &writes_std);
-
-  if (argc > 6) {
-    merged.AppendToFile(csv_pathname);
-  } else {
-    merged.WriteToFile(csv_pathname);
-  }
-
   LOG(INFO) << "throughput " << N * 1e6 / latency_us
             << " ops/s, total duration (ms) " << latency_us / 1e3 << ", num "
             << N << ", write_ratio " << kWriteRatio;

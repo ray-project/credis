@@ -582,6 +582,7 @@ int MemberReplicate_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
   // }
 
   DLOG(INFO) << "has child? " << (module.child() != nullptr);
+  // TODO(zongheng): we should cap the size of each send.
   if (module.child() && !module.sn_to_key().empty()) {
     DLOG(INFO) << "Called replicate. sn_to_key size "
                << module.sn_to_key().size();
@@ -615,8 +616,8 @@ int MemberReplicate_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
       ++cnt;
     }
     const std::string blob = ss.str();
-    LOG(INFO) << "num_entries " << num_entries << " blob.size() "
-              << blob.size();
+    LOG(INFO) << "num_entries " << num_entries << " blob.size() " << blob.size()
+              << " or " << blob.size() / (1 << 20) << " MB";
 
     // TODO(zongheng): for now this should probably be synchronous.
     const int status = redisAsyncCommand(
@@ -627,7 +628,6 @@ int MemberReplicate_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
   }
   const double end = timer.NowMicrosecs();
   const int millis = static_cast<int>((end - start) / 1e3);
-  std::cout << "MemberReplicate took " << millis << " ms";
   LOG(INFO) << "MemberReplicate took " << millis << " ms";
   return RedisModule_ReplyWithLongLong(ctx, millis);
 }

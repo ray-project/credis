@@ -14,15 +14,14 @@ N=${5:-""}
 
 pushd build; make -j; popd
 
-for write_ratio in 1 ; do
+for write_ratio in 0.5 ; do
+    # for write_ratio in 1 ; do
     # Chain
     for num_nodes in  2; do
         echo 'num_clients throughput latency' > chain-${num_nodes}node-wr${write_ratio}.txt
 
-        # for num_clients in 2; do
-            # for num_clients in 32; do
-                # for num_clients in $(seq 64 -4 1); do
-                for num_clients in 32; do
+        for num_clients in 1; do
+                # for num_clients in 16; do
 
             ssh -o StrictHostKeyChecking=no ubuntu@${HEAD_SERVER} "pkill -f -9 redis-server; sleep 1" || true
             ssh -o StrictHostKeyChecking=no ubuntu@${TAIL_SERVER} "pkill -f -9 redis-server; sleep 1" || true

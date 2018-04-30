@@ -14,8 +14,8 @@ N=${5:-""}
 
 pushd build; make -j; popd
 
-# for write_ratio in 0.5 ; do
-    for write_ratio in 1 ; do
+for write_ratio in 0.5 ; do
+    # for write_ratio in 1 ; do
     # Chain
     for num_nodes in  2; do
         echo 'num_clients throughput latency' > chain-${num_nodes}node-wr${write_ratio}.txt
@@ -23,8 +23,10 @@ pushd build; make -j; popd
         for num_clients in 1; do
                 # for num_clients in 16; do
 
-            ssh -o StrictHostKeyChecking=no ubuntu@${HEAD_SERVER} "pkill -f -9 redis-server; sleep 1" || true
-            ssh -o StrictHostKeyChecking=no ubuntu@${TAIL_SERVER} "pkill -f -9 redis-server; sleep 1" || true
+            ssh -o StrictHostKeyChecking=no ubuntu@${HEAD_SERVER} "pkill redis-server; sleep 1; pkill redis-server;" || true
+            ssh -o StrictHostKeyChecking=no ubuntu@${TAIL_SERVER} "pkill redis-server; sleep 1; pkill redis-server;" || true
+
+            sleep 2
 
             # Launch master & head.
             ssh -o StrictHostKeyChecking=no ubuntu@${HEAD_SERVER} << EOF
@@ -37,7 +39,7 @@ cd ~/credis
 ./setup.sh 1 $HEAD_SERVER 6371
 EOF
 
-            sleep 5
+            # sleep 5
             ./distributed_seqput.sh $num_clients $num_nodes $write_ratio \
                                     $HEAD_SERVER $TAIL_SERVER $NODE_ADD $NODE_KILL $N &
             wait

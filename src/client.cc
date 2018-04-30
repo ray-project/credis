@@ -93,10 +93,9 @@ void RedisDisconnectCallback(const redisAsyncContext* c, int status) {
     // own teardown. So LOG(INFO) cannot be used here.
     return;
   }
-  LOG(INFO) << "Disconnected redisAsyncContext to remote port "
+  LOG(INFO) << "Disconnected redisAsyncContext to " << c->c.tcp.host << ":"
             << c->c.tcp.port;
-  LOG(INFO) << "Error: " << c->errstr;
-  LOG(INFO) << "Remote host " << c->c.tcp.host;
+  LOG(INFO) << "  Error: " << c->errstr;
 
   // The context object is always freed after the disconnect callback fired.
   // When a reconnect is needed, the disconnect callback is a good point to do
@@ -164,6 +163,10 @@ Status RedisClient::ReconnectAckContext(const std::string& address, int port,
     redisAsyncDisconnect(ack_subscribe_context_);
   }
   CHECK(ConnectContext(address, port, &read_context_).ok());
+  CHECK(loop_ != nullptr);
+  if (redisAeAttach(loop_, read_context_) != REDIS_OK) {
+    return Status::IOError("could not attach redis event loop");
+  }
   CHECK(ConnectContext(address, port, &ack_subscribe_context_).ok());
   return RegisterAckCallback(callback);
 }
@@ -171,6 +174,11 @@ Status RedisClient::ReconnectAckContext(const std::string& address, int port,
 Status RedisClient::ConnectHead(const std::string& address, int port) {
   CHECK(write_context_ == nullptr);
   ReturnNotOk(ConnectContext(address, port, &write_context_));
+
+  // // TODO(zongheng): remove these!!
+  // redisAsyncDisconnect(write_context_);
+  // ReturnNotOk(ConnectContext(address, port, &write_context_));
+
   return Status::OK();
 }
 
@@ -179,6 +187,13 @@ Status RedisClient::ConnectTail(const std::string& address, int port) {
   CHECK(ack_subscribe_context_ == nullptr);
   ReturnNotOk(ConnectContext(address, port, &read_context_));
   ReturnNotOk(ConnectContext(address, port, &ack_subscribe_context_));
+
+  // // TODO(zongheng): remove these!!
+  // redisAsyncDisconnect(read_context_);
+  // ReturnNotOk(ConnectContext(address, port, &read_context_));
+  // redisAsyncDisconnect(ack_subscribe_context_);
+  // ReturnNotOk(ConnectContext(address, port, &ack_subscribe_context_));
+
   // CHECK(ConnectContext(address, port, &read_context_).ok());
   // CHECK(ConnectContext(address, port, &ack_subscribe_context_).ok());
   return Status::OK();

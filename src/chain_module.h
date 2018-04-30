@@ -41,56 +41,59 @@ void RedisDisconnectCallback(const redisAsyncContext* c, int status) {
   LOG(INFO) << "Error: " << c->errstr;
   LOG(INFO) << "Remote host " << c->c.tcp.host;
 
-  // TODO(zongheng): should we clean up event loop?  should we call
-  // asyncDisconnect()?
-  if (!c->err) {
-    LOG(INFO) << "!c->err";
-    redisAsyncDisconnect(const_cast<redisAsyncContext*>(c));
-  } else {
-    // This causes accessing 0x0, segfault.
-    // Backtrace:
-    // ./redis/src/redis-server *:6370(logStackTrace+0x45)[0x46ae75]
-    // ./redis/src/redis-server *:6370(sigsegvHandler+0xb9)[0x46b639]
-    // /lib/x86_64-linux-gnu/libpthread.so.0(+0x11390)[0x7f56dbbb1390]
-    // /lib/x86_64-linux-gnu/libc.so.6(cfree+0x42)[0x7f56db85a532]
-    // ./redis/src/redis-server *:6370[0x49e113]
-    // ./redis/src/redis-server *:6370[0x49e81b]
-    // ./build/src/libmember.so(+0x18069)[0x7f56d97c4069]
-    // ./redis/src/redis-server *:6370[0x49e86b]
-    // ./redis/src/redis-server *:6370(aeProcessEvents+0x13e)[0x42592e]
-    // ./redis/src/redis-server *:6370(aeMain+0x2b)[0x425d5b]
-    // ./redis/src/redis-server *:6370(main+0x4a6)[0x422926]
-    // /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0xf0)[0x7f56db7f6830]
-    // ./redis/src/redis-server *:6370(_start+0x29)[0x422c29]
-    // LOG(INFO) << "c->err, trying redisAsyncDisconnect anyway";
+  // // TODO(zongheng): should we clean up event loop?  should we call
+  // // asyncDisconnect()?
+  // if (!c->err) {
+  //   LOG(INFO) << "!c->err";
+  //   redisAsyncDisconnect(const_cast<redisAsyncContext*>(c));
+  // } else {
+  //   // This causes accessing 0x0, segfault.
+  //   // Backtrace:
+  //   // ./redis/src/redis-server *:6370(logStackTrace+0x45)[0x46ae75]
+  //   // ./redis/src/redis-server *:6370(sigsegvHandler+0xb9)[0x46b639]
+  //   // /lib/x86_64-linux-gnu/libpthread.so.0(+0x11390)[0x7f56dbbb1390]
+  //   // /lib/x86_64-linux-gnu/libc.so.6(cfree+0x42)[0x7f56db85a532]
+  //   // ./redis/src/redis-server *:6370[0x49e113]
+  //   // ./redis/src/redis-server *:6370[0x49e81b]
+  //   // ./build/src/libmember.so(+0x18069)[0x7f56d97c4069]
+  //   // ./redis/src/redis-server *:6370[0x49e86b]
+  //   // ./redis/src/redis-server *:6370(aeProcessEvents+0x13e)[0x42592e]
+  //   // ./redis/src/redis-server *:6370(aeMain+0x2b)[0x425d5b]
+  //   // ./redis/src/redis-server *:6370(main+0x4a6)[0x422926]
+  //   //
+  //   /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0xf0)[0x7f56db7f6830]
+  //   // ./redis/src/redis-server *:6370(_start+0x29)[0x422c29]
+  //   // LOG(INFO) << "c->err, trying redisAsyncDisconnect anyway";
 
-    // 22 I0426 19:31:25.395185 59211 chain_module.h:67] (c->ev.data ==
-    // nullptr)? 0
-    //                                                     23 *** Error in
-    //                                                     `./redis/src/redis-server
-    //                                                     *:6370': double free
-    //                                                     or corruption
-    //                                                     (fasttop):
-    //                                                     0x0000000001347dd0
-    //                                                     ***
-    // 24 ======= Backtrace: =========
-    // 25 /lib/x86_64-linux-gnu/libc.so.6(+0x777e5)[0x7f79f94957e5]
-    // 26 /lib/x86_64-linux-gnu/libc.so.6(+0x8037a)[0x7f79f949e37a]
-    // 27 /lib/x86_64-linux-gnu/libc.so.6(cfree+0x4c)[0x7f79f94a253c]
-    // 28 ./build/src/libmember.so(+0x18128)[0x7f79f75c4128]
-    // 29 ./redis/src/redis-server *:6370[0x49e86b]
-    // 30 ./redis/src/redis-server *:6370(aeProcessEvents+0x13e)[0x42592e]
-    // 31 ./redis/src/redis-server *:6370(aeMain+0x2b)[0x425d5b]
-    // 32 ./redis/src/redis-server *:6370(main+0x4a6)[0x422926]
-    // 33
-    // /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0xf0)[0x7f79f943e830]
-    // 34 ./redis/src/redis-server *:6370(_start+0x29)[0x422c29]
-    // bool isnull = (c->ev.data == nullptr);
-    // LOG(INFO) << "(c->ev.data == nullptr)? " << isnull;
-    // c->ev.cleanup(c->ev.data);
-    // redisAsyncDisconnect(const_cast<redisAsyncContext*>(c));
-  }
-  // c->ev.cleanup(c->ev.data);
+  //   // 22 I0426 19:31:25.395185 59211 chain_module.h:67] (c->ev.data ==
+  //   // nullptr)? 0
+  //   //                                                     23 *** Error in
+  //   // `./redis/src/redis-server
+  //   //                                                     *:6370': double
+  //   free
+  //   //                                                     or corruption
+  //   //                                                     (fasttop):
+  //   //                                                     0x0000000001347dd0
+  //   //                                                     ***
+  //   // 24 ======= Backtrace: =========
+  //   // 25 /lib/x86_64-linux-gnu/libc.so.6(+0x777e5)[0x7f79f94957e5]
+  //   // 26 /lib/x86_64-linux-gnu/libc.so.6(+0x8037a)[0x7f79f949e37a]
+  //   // 27 /lib/x86_64-linux-gnu/libc.so.6(cfree+0x4c)[0x7f79f94a253c]
+  //   // 28 ./build/src/libmember.so(+0x18128)[0x7f79f75c4128]
+  //   // 29 ./redis/src/redis-server *:6370[0x49e86b]
+  //   // 30 ./redis/src/redis-server *:6370(aeProcessEvents+0x13e)[0x42592e]
+  //   // 31 ./redis/src/redis-server *:6370(aeMain+0x2b)[0x425d5b]
+  //   // 32 ./redis/src/redis-server *:6370(main+0x4a6)[0x422926]
+  //   // 33
+  //   //
+  //   /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0xf0)[0x7f79f943e830]
+  //   // 34 ./redis/src/redis-server *:6370(_start+0x29)[0x422c29]
+  //   // bool isnull = (c->ev.data == nullptr);
+  //   // LOG(INFO) << "(c->ev.data == nullptr)? " << isnull;
+  //   // c->ev.cleanup(c->ev.data);
+  //   // redisAsyncDisconnect(const_cast<redisAsyncContext*>(c));
+  // }
+  // // c->ev.cleanup(c->ev.data);
 
   // The context object is always freed after the disconnect callback fired.
   // When a reconnect is needed, the disconnect callback is a good point to do
@@ -223,29 +226,42 @@ class RedisChainModule {
     if (parent_) redisAsyncFree(parent_);
   }
 
-  void Reset(std::string& prev_address, std::string& prev_port,
-             std::string& next_address, std::string& next_port) {
-    prev_address_ = prev_address;
-    prev_port_ = prev_port;
-    next_address_ = next_address;
-    next_port_ = next_port;
-
+  void Reset(const std::string& prev_address, const std::string& prev_port,
+             const std::string& next_address, const std::string& next_port) {
     // If "c->err" is present, the disconnect callback should've already free'd
     // the async context.
-    if (child_ && !child_->err) {
-      redisAsyncDisconnect(child_);
-    }
-    if (parent_ && !parent_->err) {
-      redisAsyncDisconnect(parent_);
+    if (!next_address.empty()) {
+      next_address_ = next_address;
+      next_port_ = next_port;
+
+      if (child_ && !child_->err) {
+        redisAsyncDisconnect(child_);
+      }
+      child_ = nullptr;
+      if (next_address != "nil") {
+        child_ = AsyncConnect(next_address, std::stoi(next_port));
+
+        // // TODO(zongheng): remove these!!
+        // redisAsyncDisconnect(child_);
+        // child_ = AsyncConnect(next_address, std::stoi(next_port));
+      }
     }
 
-    child_ = NULL;
-    parent_ = NULL;
-    if (next_address != "nil") {
-      child_ = AsyncConnect(next_address, std::stoi(next_port));
-    }
-    if (prev_address != "nil") {
-      parent_ = AsyncConnect(prev_address, std::stoi(prev_port));
+    if (!prev_address.empty()) {
+      prev_address_ = prev_address;
+      prev_port_ = prev_port;
+
+      if (parent_ && !parent_->err) {
+        redisAsyncDisconnect(parent_);
+      }
+      parent_ = nullptr;
+      if (prev_address != "nil") {
+        parent_ = AsyncConnect(prev_address, std::stoi(prev_port));
+
+        // // TODO(zongheng): remove these!!
+        // redisAsyncDisconnect(parent_);
+        // parent_ = AsyncConnect(prev_address, std::stoi(prev_port));
+      }
     }
   }
 

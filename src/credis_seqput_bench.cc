@@ -52,24 +52,28 @@ int N = 200000;
 // 1-chain ~5sec, 2-chain ~8sec.
 // const int N = 20000;
 
-aeEventLoop* loop = aeCreateEventLoop(64);
+aeEventLoop* loop = aeCreateEventLoop(1024);
 int writes_completed = 0;
 int reads_completed = 0;
 Timer reads_timer, writes_timer;
-std::string last_issued_read_key;
-int last_issued_read_key_index;
 // Randomness.
 std::default_random_engine re;
 double kWriteRatio = 1.0;
 
-// LastUnacked.
-// TODO(zongheng): should probably be a struct.
-double last_unacked_timestamp = -1;
-int64_t last_unacked_seqnum = -1;
-std::string last_unacked_key, last_unacked_value;
+// Requests that have not been acked / received a response.
+struct InFlight {
+  // -1 means not in-flight.
+  double timestamp = -1;
+  int64_t seqnum = -1;  // Only for writes.
 
-redisAsyncContext* write_context = nullptr;
-redisAsyncContext* read_context = nullptr;
+  std::string key;
+  int key_index;      // Only for reads.
+  std::string value;  // Only for writes.
+};
+
+// Invariant: at most 1 of the following is in-flight at any given time.
+InFlight inflight_read;
+InFlight inflight_write;
 
 // Client's bookkeeping for seqnums.
 std::unordered_set<int64_t> assigned_seqnums;
@@ -90,7 +94,7 @@ std::vector<std::string> acked_values;
 void SeqPutCallback(redisAsyncContext*, void*, void*);
 void SeqGetCallback(redisAsyncContext*, void*, void*);
 void AsyncPut(bool);
-void AsyncGet();
+void AsyncGet(bool);
 void AsyncNoReply();
 
 // Launch a GET or PUT, depending on "write_ratio".
@@ -102,7 +106,7 @@ void AsyncRandomCommand() {
   if (r < kWriteRatio || writes_completed == 0) {
     AsyncPut(/*is_retry=*/false);
   } else {
-    AsyncGet();
+    AsyncGet(/*is_retry=*/false);
   }
 }
 
@@ -113,9 +117,16 @@ void OnCompleteLaunchNext(Timer* timer, int* cnt, int other_cnt,
   ++(*cnt);
   timer->TimeOpEnd(*cnt);
   if (is_write) {
-    acked_keys.push_back(last_unacked_key);
-    acked_values.push_back(last_unacked_value);
-    // TODO(zongheng): we don't need to change last_unacked_{k,v} do we?
+    // TODO(zongheng): we don't need to reset inflight_write.{key,value} do we?
+    inflight_write.timestamp = -1;
+    inflight_write.seqnum = -1;
+    acked_keys.push_back(inflight_write.key);
+    acked_values.push_back(inflight_write.value);
+  } else {
+    inflight_read.timestamp = -1;
+    inflight_read.seqnum = -1;
+    // If an unexpected GET callback is fired, this will result in out-of-range.
+    inflight_read.key_index = -1;
   }
   if (*cnt + other_cnt == N) {
     aeStop(loop);
@@ -142,12 +153,10 @@ void SeqPutCallback(redisAsyncContext* write_context,  // != ack_context.
   auto it = acked_seqnums.find(assigned_seqnum);
   if (it != acked_seqnums.end()) {
     acked_seqnums.erase(it);
-    last_unacked_timestamp = -1;
-    last_unacked_seqnum = -1;
     OnCompleteLaunchNext(&writes_timer, &writes_completed, reads_completed,
                          /*is_write=*/true);
   } else {
-    DLOG(INFO) << "assigning last_unacked_seqnum with value "
+    DLOG(INFO) << "assigning inflight_write.seqnum with value "
                << assigned_seqnum;
     // This is a contract with the store.  Even if the store drops writes during
     // anomaly repair, it should return nothing for the dropped writes.  (This
@@ -159,22 +168,22 @@ void SeqPutCallback(redisAsyncContext* write_context,  // != ack_context.
     // command not replying anything...)
     CHECK(assigned_seqnum >= writes_completed)
         << assigned_seqnum << " " << writes_completed;
-    last_unacked_seqnum = assigned_seqnum;
+    inflight_write.seqnum = assigned_seqnum;
     assigned_seqnums.insert(assigned_seqnum);
   }
 }
 
 void AsyncPut(bool is_retry) {
   if (!is_retry) {
-    last_unacked_key = random_string(kKeySize);
-    last_unacked_value = random_string(kValueSize);
-    last_unacked_timestamp = writes_timer.TimeOpBegin();
+    inflight_write.key = random_string(kKeySize);
+    inflight_write.value = random_string(kValueSize);
+    inflight_write.timestamp = writes_timer.TimeOpBegin();
   }
   const int status = redisAsyncCommand(
-      write_context, &SeqPutCallback,
-      /*privdata=*/NULL, "MEMBER.PUT %b %b %b", last_unacked_key.data(),
-      last_unacked_key.size(), last_unacked_value.data(),
-      last_unacked_value.size(), client_id.data(), client_id.size());
+      client->write_context(), &SeqPutCallback,
+      /*privdata=*/NULL, "MEMBER.PUT %b %b %b", inflight_write.key.data(),
+      inflight_write.key.size(), inflight_write.value.data(),
+      inflight_write.value.size(), client_id.data(), client_id.size());
   CHECK(status == REDIS_OK);
 }
 
@@ -183,39 +192,75 @@ void AsyncNoReplyCallback(redisAsyncContext* write_context,  // != ack_context.
   CHECK(0) << "Should never be called";
 }
 void AsyncNoReply() {
-  const int status =
-      redisAsyncCommand(write_context, /*callback=*/&AsyncNoReplyCallback,
-                        /*privdata=*/NULL, "NOREPLY");
+  const int status = redisAsyncCommand(client->write_context(),
+                                       /*callback=*/&AsyncNoReplyCallback,
+                                       /*privdata=*/NULL, "NOREPLY");
   CHECK(status == REDIS_OK);
   LOG(INFO) << "Done issuing AsyncNoReply";
 }
 
-void AsyncGet() {
+void AsyncGet(bool is_retry) {
   CHECK(writes_completed > 0);
 
-  std::uniform_int_distribution<> unif_int(0, writes_completed - 1);
-  const int r = unif_int(re);
-  CHECK(r < acked_keys.size()) << "writes_completed " << writes_completed
-                               << " acked_keys.size() " << acked_keys.size();
-  last_issued_read_key_index = r;
-  last_issued_read_key = acked_keys[r];
-  reads_timer.TimeOpBegin();
+  if (!is_retry) {
+    std::uniform_int_distribution<> unif_int(0, writes_completed - 1);
+    const int r = unif_int(re);
+    CHECK(r < acked_keys.size()) << "writes_completed " << writes_completed
+                                 << " acked_keys.size() " << acked_keys.size();
+
+    inflight_read.key_index = r;
+    inflight_read.key = acked_keys[r];
+    inflight_read.timestamp = reads_timer.TimeOpBegin();
+  }
+
   const int status = redisAsyncCommand(
-      read_context, reinterpret_cast<redisCallbackFn*>(&SeqGetCallback),
-      /*privdata=*/NULL, "READ %b", last_issued_read_key.data(),
-      last_issued_read_key.size());
-  CHECK(status == REDIS_OK);
+      client->read_context(),
+      reinterpret_cast<redisCallbackFn*>(&SeqGetCallback),
+      // /*privdata=*/NULL, "GET %b", inflight_read.key.data(),
+      /*privdata=*/NULL, "READ %b", inflight_read.key.data(),
+      inflight_read.key.size());
+  if (status != REDIS_OK) LOG(INFO) << "read_context likely dead";
+  // CHECK(status == REDIS_OK);
 }
 
-void SeqGetCallback(redisAsyncContext* /*context*/, void* r,
-                    void* /*privdata*/) {
+const char* kNotTailError = "ERR this command must be called on the tail.";
+
+void SeqGetCallback(redisAsyncContext* context, void* r, void* /*privdata*/) {
+  if (r == nullptr) {
+    DLOG(INFO)
+        << "Received null reply, ignoring (could happen upon the removal "
+           "or reconnection of faulty server nodes)";
+    return;
+  }
   const redisReply* reply = reinterpret_cast<redisReply*>(r);
   // LOG(INFO) << "reply type " << reply->type << "; issued get "
-  //           << last_issued_read_key;
+  //           << inflight_read.key;
   const std::string actual = std::string(reply->str, reply->len);
-  CHECK(acked_values[last_issued_read_key_index] == actual);
-  // CHECK(last_issued_read_key == actual)
-  //     << "; expected " << last_issued_read_key << " actual " << actual;
+  if (actual == kNotTailError) {
+    LOG(INFO) << "Received NotTailError, ignored and waiting for retry timer "
+                 "to kick in";
+    return;
+  } else if (actual.empty()) {
+    LOG(INFO) << "Received nil TODO: this is a bug, but client can get around "
+                 "this by ignoring & waiting a bit and retry...";
+    return;
+  } else if (inflight_read.key_index == -1) {
+    LOG(INFO) << "inflight_read.key_index == -1 but SeqGetCallback fired, "
+                 "ignored.. TODO: this is a bug, but client can get around "
+                 "this by ignoring & waiting a bit and retry...";
+    return;
+  }
+
+  CHECK(acked_values[inflight_read.key_index] == actual)
+      << "\n context " << context->c.tcp.host << ":" << context->c.tcp.port
+      << "\n diff(inflight_read.timestamp) "
+      << reads_timer.NowMicrosecs() - inflight_read.timestamp
+      << "\n inflight_read.key_index " << inflight_read.key_index
+      << "\n inflight_read.key " << inflight_read.key << "\n actual " << actual
+      << "\n actual.size() " << actual.size() << "\n acked_val "
+      << acked_values[inflight_read.key_index];
+  // CHECK(inflight_read.key == actual)
+  //     << "; expected " << inflight_read.key << " actual " << actual;
   OnCompleteLaunchNext(&reads_timer, &reads_completed, writes_completed,
                        /*is_write=*/false);
 }
@@ -239,7 +284,7 @@ void SeqPutAckCallbackHelper(
   if (r == nullptr) {
     DLOG(INFO)
         << "Received null reply, ignoring (could happen upon the removal "
-           "or reconnection of fault server nodes)";
+           "or reconnection of faulty server nodes)";
     // NOTE(zongheng): accessing ack_context at all might cause segfaults. Even
     // for (ack_context == nullptr) test.  Weird.
     return;
@@ -266,10 +311,8 @@ void SeqPutAckCallbackHelper(
   }
   // Otherwise, found & act on this ACK.
   DLOG(INFO) << "seqnum acked " << received_sn
-             << "; setting last_unacked_{timestamp,seqnum} to -1";
+             << "; setting inflight_write.{timestamp,seqnum} to -1";
   assigned_seqnums.erase(it);
-  last_unacked_timestamp = -1;
-  last_unacked_seqnum = -1;
   OnCompleteLaunchNext(&writes_timer, &writes_completed, reads_completed,
                        /*is_write=*/true);
 }
@@ -305,15 +348,17 @@ const double kRefreshTailPutThresholdMicrosecs = 2 * kRetryTimeoutMicrosecs;
 // except by luck?
 int RefreshTailTimer(aeEventLoop* loop, long long /*timer_id*/, void*) {
   const double now_us = writes_timer.NowMicrosecs();
-  const double diff = now_us - last_unacked_timestamp;
-  if (last_unacked_timestamp == -1 ||
-      diff < kRefreshTailPutThresholdMicrosecs) {
-    // LOG(INFO) << "RefreshTailTimer: last_unacked_timestamp "
-    //           << last_unacked_timestamp << " diff " << diff;
+  const double time_since_last_write = now_us - inflight_write.timestamp;
+  const double time_since_last_read = now_us - inflight_read.timestamp;
+  // We do not refresh iff (1) there is inflight read or write, OR (2) the
+  // inflight request is recent enough.
+  if ((inflight_write.timestamp == -1 ||
+       time_since_last_write < kRefreshTailPutThresholdMicrosecs) &&
+      (inflight_read.timestamp == -1 ||
+       time_since_last_read < kRefreshTailPutThresholdMicrosecs)) {
     // Fire again at this distance from now.
     return kRefreshTailTimerMillisecs;
   }
-
   DLOG(INFO) << "In RefreshTailTimer";
 
   // Otherwise, ask master for new tail, and connect to it.
@@ -322,6 +367,7 @@ int RefreshTailTimer(aeEventLoop* loop, long long /*timer_id*/, void*) {
   DLOG(INFO) << "Issuing Tail()";
   CHECK(master_client->Tail(&tail_address, &tail_port).ok());
   DLOG(INFO) << "Issuing ReconnectAckContext()";
+  // TODO(zongheng): fix this to SeqGet...AfterRefresh?
   CHECK(client
             ->ReconnectAckContext(
                 tail_address, tail_port,
@@ -343,25 +389,38 @@ int RefreshTailTimer(aeEventLoop* loop, long long /*timer_id*/, void*) {
 
 int RetryPutTimer(aeEventLoop* loop, long long /*timer_id*/, void*) {
   const double now_us = writes_timer.NowMicrosecs();
-  const double diff = now_us - last_unacked_timestamp;
-  if (last_unacked_timestamp > 0 && diff > kRetryTimeoutMicrosecs) {
+  const double diff = now_us - inflight_write.timestamp;
+  if (inflight_write.timestamp > 0 && diff > kRetryTimeoutMicrosecs) {
     LOG(INFO) << "Retrying PUT, writes_completed " << writes_completed;
-    LOG(INFO) << " time diff (us) " << diff << "; last_unacked_seqnum "
-              << last_unacked_seqnum;
-    // If the ACK for "last_unacked_seqnum" comes back later, we should ignore
+    LOG(INFO) << " time diff (us) " << diff << "; inflight_write.seqnum "
+              << inflight_write.seqnum;
+    // If the ACK for "inflight_write.seqnum" comes back later, we should ignore
     // it, since we are about to retry and will associate a new seqnum to the
     // retried op.
-    if (last_unacked_seqnum >= 0) {
-      auto it = assigned_seqnums.find(last_unacked_seqnum);
+    if (inflight_write.seqnum >= 0) {
+      auto it = assigned_seqnums.find(inflight_write.seqnum);
       CHECK(it != assigned_seqnums.end());
       assigned_seqnums.erase(it);
-      // We do not assign -1 to "last_unacked_timestamp" because it should
+      // We do not assign -1 to "inflight_write.timestamp" because it should
       // capture the original op's start time.
-      last_unacked_seqnum = -1;
+      inflight_write.seqnum = -1;
     }
     AsyncPut(/*is_retry=*/true);
 
     // return kRetryTimeoutMicrosecs;
+  }
+  return kRetryTimerMillisecs;  // Fire at this distance from now.
+}
+
+int RetryGetTimer(aeEventLoop* /*loop*/, long long /*timer_id*/, void*) {
+  const double now_us = reads_timer.NowMicrosecs();
+  const double diff = now_us - inflight_read.timestamp;
+  if (inflight_read.timestamp > 0 && diff > kRetryTimeoutMicrosecs) {
+    LOG(INFO) << "Retrying GET, key_index " << inflight_read.key_index
+              << ", writes_completed " << writes_completed
+              << ", reads_completed " << reads_completed;
+    LOG(INFO) << " time diff (us) " << diff;
+    AsyncGet(/*is_retry=*/true);
   }
   return kRetryTimerMillisecs;  // Fire at this distance from now.
 }
@@ -437,14 +496,13 @@ int main(int argc, char** argv) {
                 static_cast<redisCallbackFn*>(&SeqPutAckCallback))
             .ok());
 
-  write_context = client->write_context();
-  read_context = client->read_context();
-
   // Timings related.
   reads_timer.ExpectOps(N);
   writes_timer.ExpectOps(N);
 
   aeCreateTimeEvent(loop, /*milliseconds=*/kRetryTimerMillisecs, &RetryPutTimer,
+                    /*clientData=*/NULL, /*finalizerProc=*/NULL);
+  aeCreateTimeEvent(loop, /*milliseconds=*/kRetryTimerMillisecs, &RetryGetTimer,
                     /*clientData=*/NULL, /*finalizerProc=*/NULL);
   aeCreateTimeEvent(loop, /*milliseconds=*/kRefreshTailTimerMillisecs,
                     &RefreshTailTimer, /*clientData=*/NULL,

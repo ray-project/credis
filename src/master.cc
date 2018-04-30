@@ -101,6 +101,11 @@ Status SetRole(redisContext* context, const std::string& role,
   }
 }
 
+// TODO(zongheng): as it's currently implemented, MemberReplicate is NOT
+// synchronous at the moment, so this presents a race. E.g., state transfer is
+// still underway to the new tail, but step (3) below has already issued namely
+// telling the new tail to start serving reads.
+
 // Handling node addition at the end of chain.
 //
 // We follow the protocol outlined at the end of Section 3 of the paper.

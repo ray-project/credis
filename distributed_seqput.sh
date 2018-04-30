@@ -53,6 +53,9 @@ EOF
 fi
 }
 
+# maybe_kill 0 &
+# maybe_add 2 &
+
 maybe_kill ${NODE_KILL} &
 maybe_add ${NODE_ADD} &
 

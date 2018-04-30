@@ -294,25 +294,13 @@ int MemberSetRole_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
     CHECK(role == "");
   }
 
-  std::string prev_address = ReadString(argv[2]);
-  if (prev_address == "") {
-    prev_address = module.prev_address();
-  }
-  std::string prev_port = ReadString(argv[3]);
-  if (prev_port == "") {
-    prev_port = module.prev_port();
-  }
-  std::string next_address = ReadString(argv[4]);
-  if (next_address == "") {
-    next_address = module.next_address();
-  }
-  std::string next_port = ReadString(argv[5]);
-  if (next_port == "") {
-    next_port = module.next_port();
-  }
+  const std::string prev_address = ReadString(argv[2]);
+  const std::string prev_port = ReadString(argv[3]);
+  const std::string next_address = ReadString(argv[4]);
+  const std::string next_port = ReadString(argv[5]);
 
-  DLOG(INFO) << "MemberSetRole args: " << role << " " << prev_address << " "
-             << prev_port << " " << next_address << " " << next_port;
+  LOG(INFO) << "MemberSetRole args: " << role << " " << prev_address << " "
+            << prev_port << " " << next_address << " " << next_port;
 
   module.Reset(prev_address, prev_port, next_address, next_port);
 
@@ -575,12 +563,6 @@ int MemberNoPropBatchedPut_RedisCommand(RedisModuleCtx* ctx,
 int MemberReplicate_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
                                  int argc) {
   const double start = timer.NowMicrosecs();
-  LOG(INFO) << "In MemberReplicate, argc " << argc;
-  // REDISMODULE_NOT_USED(argv);
-  // if (argc != 1) {
-  //   return RedisModule_WrongArity(ctx);
-  // }
-
   DLOG(INFO) << "has child? " << (module.child() != nullptr);
   // TODO(zongheng): we should cap the size of each send.
   if (module.child() && !module.sn_to_key().empty()) {

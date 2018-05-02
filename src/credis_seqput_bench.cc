@@ -63,8 +63,9 @@ double kWriteRatio = 1.0;
 // Requests that have not been acked / received a response.
 struct InFlight {
   // -1 means not in-flight.
-  double timestamp = -1;
-  int64_t seqnum = -1;  // Only for writes.
+  double timestamp = -1;         // When first submitted.
+  double latest_timestamp = -1;  // Most recent retry.
+  int64_t seqnum = -1;           // Only for writes.
 
   std::string key;
   int key_index;      // Only for reads.
@@ -96,6 +97,7 @@ void SeqGetCallback(redisAsyncContext*, void*, void*);
 void AsyncPut(bool);
 void AsyncGet(bool);
 void AsyncNoReply();
+int RefreshTailTimer(aeEventLoop*, long long, void*);
 
 // Launch a GET or PUT, depending on "write_ratio".
 void AsyncRandomCommand() {
@@ -119,11 +121,13 @@ void OnCompleteLaunchNext(Timer* timer, int* cnt, int other_cnt,
   if (is_write) {
     // TODO(zongheng): we don't need to reset inflight_write.{key,value} do we?
     inflight_write.timestamp = -1;
+    inflight_write.latest_timestamp = -1;
     inflight_write.seqnum = -1;
     acked_keys.push_back(inflight_write.key);
     acked_values.push_back(inflight_write.value);
   } else {
     inflight_read.timestamp = -1;
+    inflight_read.latest_timestamp = -1;
     inflight_read.seqnum = -1;
     // If an unexpected GET callback is fired, this will result in out-of-range.
     inflight_read.key_index = -1;
@@ -178,6 +182,9 @@ void AsyncPut(bool is_retry) {
     inflight_write.key = random_string(kKeySize);
     inflight_write.value = random_string(kValueSize);
     inflight_write.timestamp = writes_timer.TimeOpBegin();
+    inflight_write.latest_timestamp = inflight_write.timestamp;
+  } else {
+    inflight_write.latest_timestamp = writes_timer.NowMicrosecs();
   }
   const int status = redisAsyncCommand(
       client->write_context(), &SeqPutCallback,
@@ -211,6 +218,9 @@ void AsyncGet(bool is_retry) {
     inflight_read.key_index = r;
     inflight_read.key = acked_keys[r];
     inflight_read.timestamp = reads_timer.TimeOpBegin();
+    inflight_read.latest_timestamp = inflight_read.timestamp;
+  } else {
+    inflight_read.latest_timestamp = reads_timer.NowMicrosecs();
   }
 
   const int status = redisAsyncCommand(
@@ -219,7 +229,10 @@ void AsyncGet(bool is_retry) {
       // /*privdata=*/NULL, "GET %b", inflight_read.key.data(),
       /*privdata=*/NULL, "READ %b", inflight_read.key.data(),
       inflight_read.key.size());
-  if (status != REDIS_OK) LOG(INFO) << "read_context likely dead";
+  if (status != REDIS_OK) {
+    LOG(INFO) << "read_context likely dead, refreshing";
+    RefreshTailTimer(nullptr, 0, nullptr);
+  }
   // CHECK(status == REDIS_OK);
 }
 
@@ -241,8 +254,14 @@ void SeqGetCallback(redisAsyncContext* context, void* r, void* /*privdata*/) {
                  "to kick in";
     return;
   } else if (actual.empty()) {
+    // TODO(zongheng): nil means the client reads a committed key but the store
+    // returns not found.  One situation this can happen is, the state transfer
+    // has not completed.
     LOG(INFO) << "Received nil TODO: this is a bug, but client can get around "
                  "this by ignoring & waiting a bit and retry...";
+    LOG(INFO) << " *** ignoring NotFound, testing lower bound";
+    OnCompleteLaunchNext(&reads_timer, &reads_completed, writes_completed,
+                         /*is_write=*/false);
     return;
   } else if (inflight_read.key_index == -1) {
     LOG(INFO) << "inflight_read.key_index == -1 but SeqGetCallback fired, "
@@ -330,31 +349,38 @@ void SeqPutAckCallbackAfterRefresh(
 }
 
 // Fires at this frequency.
-const long long kRetryTimerMillisecs = 100;  // For ae's timer.
+const long long kRetryTimerMillisecs = 2;  // For ae's timer.
 // Represents the timeout which if exceeded, we retry last unacked command.
-const double kRetryTimeoutMicrosecs = 1 * 1e5;  // 100 ms
+// const double kRetryTimeoutMicrosecs = 1 * 1e5;  // 100 ms
+const double kRetryTimeoutMicrosecs = 5 * 1e3;  // 5 ms
 // const double kRetryTimeoutMicrosecs = 1 * 1e6; // 1 sec
 // const double kRetryTimeoutMicrosecs = 5 * 1e6; // 5 sec
 
-const long long kRefreshTailTimerMillisecs = 100;
+// const long long kRefreshTailTimerMillisecs = 100;
+const long long kRefreshTailTimerMillisecs = 2;
 // A value of "N * kRetryTimeoutMicrosecs" here means (N - 1) retries have
 // been issued, none are heard back.  Must be N > 1.
 //
 // This knob normally forms the upper bound on
 // time-from-first-retry-to-next-success.
-const double kRefreshTailPutThresholdMicrosecs = 2 * kRetryTimeoutMicrosecs;
+
+// 500ms: idea is to avoid connecting to singleton server, in the case of
+// kill-and-instantly-add.  However sometimes 500ms is not enough.
+
+const double kRefreshTailPutThresholdMicrosecs = 2 * 1e3;  // 1e3==1ms
+// const double kRefreshTailPutThresholdMicrosecs = 2 * kRetryTimeoutMicrosecs;
 
 // TODO(zongheng): what's to prevent us from reconnecting to the tail in a loop,
 // except by luck?
 int RefreshTailTimer(aeEventLoop* loop, long long /*timer_id*/, void*) {
   const double now_us = writes_timer.NowMicrosecs();
-  const double time_since_last_write = now_us - inflight_write.timestamp;
-  const double time_since_last_read = now_us - inflight_read.timestamp;
+  const double time_since_last_write = now_us - inflight_write.latest_timestamp;
+  const double time_since_last_read = now_us - inflight_read.latest_timestamp;
   // We do not refresh iff (1) there is inflight read or write, OR (2) the
   // inflight request is recent enough.
-  if ((inflight_write.timestamp == -1 ||
+  if ((inflight_write.latest_timestamp == -1 ||
        time_since_last_write < kRefreshTailPutThresholdMicrosecs) &&
-      (inflight_read.timestamp == -1 ||
+      (inflight_read.latest_timestamp == -1 ||
        time_since_last_read < kRefreshTailPutThresholdMicrosecs)) {
     // Fire again at this distance from now.
     return kRefreshTailTimerMillisecs;
@@ -364,7 +390,14 @@ int RefreshTailTimer(aeEventLoop* loop, long long /*timer_id*/, void*) {
   // Otherwise, ask master for new tail, and connect to it.
   std::string tail_address;
   int tail_port;
-  DLOG(INFO) << "Issuing Tail()";
+  if (inflight_write.latest_timestamp != -1) {
+    LOG(INFO) << "Issuing Master.Tail(); since_last_write (us) "
+              << time_since_last_write;
+  } else {
+    LOG(INFO) << "Issuing Master.Tail(); since_last_read (us) "
+              << time_since_last_read;
+  }
+
   CHECK(master_client->Tail(&tail_address, &tail_port).ok());
   DLOG(INFO) << "Issuing ReconnectAckContext()";
   // TODO(zongheng): fix this to SeqGet...AfterRefresh?
@@ -382,9 +415,11 @@ int RefreshTailTimer(aeEventLoop* loop, long long /*timer_id*/, void*) {
   // setting.
   // TODO(zongheng): we really need some randomization / exponential backoff
   // here.
-  return 2000;  // 2 secs
+  // return 2000;  // 2 secs
   // return kRefreshTailTimerMillisecs * 10;
+  return kRefreshTailTimerMillisecs * 2;
   // return kRefreshTailTimerMillisecs * 2;
+  // return kRefreshTailTimerMillisecs;
 }
 
 int RetryPutTimer(aeEventLoop* loop, long long /*timer_id*/, void*) {
@@ -409,6 +444,8 @@ int RetryPutTimer(aeEventLoop* loop, long long /*timer_id*/, void*) {
 
     // return kRetryTimeoutMicrosecs;
   }
+  // return 2000;
+  // return kRetryTimerMillisecs * 2;  // Fire at this distance from now.
   return kRetryTimerMillisecs;  // Fire at this distance from now.
 }
 
@@ -560,7 +597,11 @@ int main(int argc, char** argv) {
   LOG(INFO) << "latency (us) mean " << composite_mean << " std "
             << composite_std;
   LOG(INFO) << "reads_lat (us) mean " << reads_mean << " std " << reads_std;
+  LOG(INFO) << "reads_lat (us) min " << reads_timer.Min() << " max "
+            << reads_timer.Max();
   LOG(INFO) << "writes_lat (us) mean " << writes_mean << " std " << writes_std;
+  LOG(INFO) << "writes_lat (us) min " << writes_timer.Min() << " max "
+            << writes_timer.Max();
 
   LOG(INFO) << "pid " << client_id;
   return 0;

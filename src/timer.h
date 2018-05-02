@@ -18,6 +18,8 @@ class Timer {
 
   void Stats(double* mean, double* std) const;
   std::string ReportStats(const std::string& name) const;
+  double Min() const;
+  double Max() const;
 
   void DropFirst(int n);
 

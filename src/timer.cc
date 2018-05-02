@@ -1,5 +1,6 @@
 #include "timer.h"
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 
@@ -21,6 +22,13 @@ void Timer::ToFile(const std::string& path, bool is_append) const {
     ofs << static_cast<int64_t>(begin_timestamps_[i]) << ","
         << latency_micros_[i] << std::endl;
   }
+}
+
+double Timer::Min() const {
+  return *std::min_element(latency_micros_.begin(), latency_micros_.end());
+}
+double Timer::Max() const {
+  return *std::max_element(latency_micros_.begin(), latency_micros_.end());
 }
 
 Timer Timer::Merge(Timer& timer1, Timer& timer2) {

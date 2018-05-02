@@ -580,7 +580,30 @@ int MemberReplicate_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
     // Schema of the whole command:
     //   MEMBER.NO_PROP_BATCHED_PUT <num_entries> <blob>
 
-    std::stringstream ss;
+    // std::stringstream ss;
+    // int cnt = 0;
+    // // NOTE(zongheng): we basically use "sn_to_key" to iterate through
+    // // in-memory state for convenience only.  Presumably, we can rely on some
+    // // other mechanisms, such as redis' native iterator, to do this.
+    // for (auto element : module.sn_to_key()) {
+    //   KeyReader reader(ctx, element.second);
+    //   size_t key_size, value_size;
+    //   const char* key_data = reader.key(&key_size);
+    //   const char* value_data = reader.value(&value_size);
+    //   const std::string sn = std::to_string(element.first);
+    //   ss << key_data << " " << value_data << " " << sn;
+    //   if (cnt + 1 < num_entries) {
+    //     ss << " ";
+    //   }
+    //   ++cnt;
+    // }
+    // const std::string blob = ss.str();
+
+    std::string blob;
+    static constexpr int kKeySize = 25;
+    static constexpr int kValSize = 512;
+    static constexpr char kSpace = ' ';
+    blob.reserve((kKeySize + kValSize) * num_entries);
     int cnt = 0;
     // NOTE(zongheng): we basically use "sn_to_key" to iterate through
     // in-memory state for convenience only.  Presumably, we can rely on some
@@ -590,14 +613,17 @@ int MemberReplicate_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
       size_t key_size, value_size;
       const char* key_data = reader.key(&key_size);
       const char* value_data = reader.value(&value_size);
-      const std::string sn = std::to_string(element.first);
-      ss << key_data << " " << value_data << " " << sn;
-      if (cnt + 1 < num_entries) {
-        ss << " ";
+      blob.append(key_data);
+      blob.append(&kSpace, 1);
+      blob.append(value_data);
+      blob.append(&kSpace, 1);
+      blob.append(std::to_string(element.first));
+      if (cnt != num_entries - 1) {
+        blob.append(&kSpace, 1);
       }
       ++cnt;
     }
-    const std::string blob = ss.str();
+
     LOG(INFO) << "num_entries " << num_entries << " blob.size() " << blob.size()
               << " or " << blob.size() / (1 << 20) << " MB";
 

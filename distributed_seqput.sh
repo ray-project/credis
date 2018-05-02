@@ -32,9 +32,11 @@ maybe_kill() {
     # Optionally, do node removal.
     if [ ! -z "${wait}" ]; then
         sleep ${wait}
-        echo 'Performing node removal...'
+        echo 'Performing node removal & instant spin-up...'
         ssh -o StrictHostKeyChecking=no ubuntu@${TAIL_SERVER} << EOF
-pkill -f redis-server.*:6371
+pkill -f -9 redis-server.*:6371
+cd ~/credis
+bash add.sh $HEAD_SERVER 6372
 EOF
     fi
 }
@@ -57,7 +59,7 @@ fi
 # maybe_add 2 &
 
 maybe_kill ${NODE_KILL} &
-maybe_add ${NODE_ADD} &
+# maybe_add ${NODE_ADD} &
 
 # NODE_KILL2=$((NODE_KILL * 3))
 # NODE_ADD2=$((NODE_ADD * 2))

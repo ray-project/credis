@@ -1,6 +1,7 @@
 include_directories(${CMAKE_SOURCE_DIR})
 include_directories(${CMAKE_SOURCE_DIR}/redis/src/)
 include_directories(${CMAKE_SOURCE_DIR}/redis/deps/)
+include_directories(${CMAKE_SOURCE_DIR}/nlohmann-json/nlohmann/single_include/)
 
 find_package(glog 0.3.5 REQUIRED)
 find_package(LevelDB REQUIRED)
@@ -25,6 +26,11 @@ else()
   set(REDIS_MODULE_LDFLAGS -shared)
 endif()
 
+
+if (CREDIS_USE_ETCD)
+  add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/etcd)
+endif()
+
 # timer
 add_library(timer STATIC timer.cc)
 target_compile_options(timer PUBLIC ${REDIS_MODULE_CFLAGS} -fPIC)
@@ -35,7 +41,11 @@ add_library(utils STATIC utils.cc)
 target_compile_options(utils PUBLIC ${REDIS_MODULE_CFLAGS} -fPIC)
 
 # master_client
-add_library(master_client STATIC master_client.cc)
+set(MASTER_CLIENT_IMPLS
+  redis_master_client.cc
+  etcd/etcd_master_client.cc)
+
+add_library(master_client STATIC ${MASTER_CLIENT_IMPLS})
 target_compile_options(master_client PUBLIC ${REDIS_MODULE_CFLAGS} -fPIC)
 target_link_libraries(master_client ${LevelDB_LIBRARIES})
 target_link_libraries(master_client glog::glog)
@@ -63,6 +73,10 @@ target_link_libraries(member glog::glog)
 target_link_libraries(member ${LevelDB_LIBRARIES})
 target_link_libraries(member master_client)
 target_link_libraries(member ${MALLOC_LIBRARY} timer)
+if(CREDIS_USE_ETCD)
+    target_link_libraries(member etcd3)
+    target_link_libraries(member etcd_utils)
+endif()
 
 # Benchmarks.
 add_executable(credis_parput_bench credis_parput_bench.cc)

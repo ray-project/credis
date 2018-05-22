@@ -3,7 +3,7 @@ import unittest
 import uuid
 
 import redis
-from tests import common
+import common
 # This script should be run from within the credis/ directory
 
 _CLIENT_ID = str(uuid.uuid4())  # Used as the channel name receiving acks.

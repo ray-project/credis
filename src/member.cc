@@ -15,10 +15,12 @@ extern "C" {
 #include "redis/src/redismodule.h"
 }
 
+#include "etcd/etcd_master_client.h"
 #include "glog/logging.h"
 #include "leveldb/db.h"
 #include "leveldb/write_batch.h"
 #include "master_client.h"
+#include "redis_master_client.h"
 #include "timer.h"
 #include "utils.h"
 
@@ -32,6 +34,50 @@ const char* const kStringOne = "1";
 
 extern "C" {
 aeEventLoop* getEventLoop();
+int getPort();
+char* getBindAddr();
+}
+
+using Clock = std::chrono::steady_clock;
+using Ms = std::chrono::milliseconds;
+using TimePoint = std::chrono::time_point<Clock, Ms>;
+
+long long int heartbeatTimeoutSec = 15;
+long long int heartbeatIntervalSec = 3;
+
+struct HeartbeatInfo {
+  int64_t lease_id;
+  EtcdURL etcd_url;
+  std::shared_ptr<grpc::Channel> channel;
+  std::chrono::time_point<Clock, Ms> last_beat;
+} hb_info;
+
+// This is an instance of aeTimeProc.
+int heartbeat(aeEventLoop* loop, long long id, void* hb_info_ptr) {
+  auto current_hb = ((HeartbeatInfo*) hb_info_ptr);
+
+  // Ensure that at least 1/2 of the heartbeat interval has really elapsed
+  // since we sent an RPC to etcd. Redis will call this function repeatedly
+  // really fast if it has nothing else to do, DoSing etcd in the process.
+  auto now = std::chrono::time_point_cast<Ms>(Clock::now());
+  auto half_hb = std::chrono::milliseconds{(heartbeatIntervalSec / 2) * 1000};
+
+  if ((now - current_hb->last_beat) < half_hb) {
+    return 0;
+  }
+  current_hb->last_beat = now;
+
+  etcd3::Client etcd(current_hb->channel);
+  etcd3::pb::LeaseKeepAliveRequest req;
+  req.set_id(current_hb->lease_id);
+  etcd3::pb::LeaseKeepAliveResponse res;
+  auto status = etcd.LeaseKeepAlive(req, &res);
+  CHECK(status.ok()) << "Failed to KeepAlive lease " << current_hb->lease_id
+                     << ". "
+                     << "GRPC error " << status.error_code() << ": "
+                     << status.error_message();
+
+  return 0;
 }
 
 using Status = leveldb::Status;  // So that it can be easily replaced.
@@ -106,7 +152,7 @@ class RedisChainModule {
            chain_role_ == ChainRole::kTail;
   }
 
-  GcsMode GcsMode() const {
+  GcsMode GetGcsMode() const {
     CHECK(gcs_mode_initialized_);
     return gcs_mode_;
   }
@@ -129,7 +175,7 @@ class RedisChainModule {
     }
   }
 
-  MasterMode MasterMode() const {
+  MasterMode GetMasterMode() const {
     CHECK(master_mode_initialized_);
     return master_mode_;
   }
@@ -161,7 +207,7 @@ class RedisChainModule {
       master_client_ = std::unique_ptr<MasterClient>(new RedisMasterClient());
       break;
     case MasterMode::kEtcd:
-      CHECK(false) << "Etcd master client is unimplemented";
+      master_client_ = std::unique_ptr<MasterClient>(new EtcdMasterClient());
     default:
       CHECK(false) << "Unrecognized master mode " << MasterModeString();
     }
@@ -200,8 +246,8 @@ class RedisChainModule {
     }
   }
 
-  Status ConnectToMaster(const std::string& address, int port) {
-    return master_client_->Connect(address, port);
+  Status ConnectToMaster(const std::string& url) {
+    return master_client_->Connect(url);
   }
   MasterClient* Master() { return master_client_.get(); }
 
@@ -256,6 +302,51 @@ class RedisChainModule {
   // Remove from sn_to_key all key s < sn.
   void CleanUpSnToKeyLessThan(int64_t sn);
 
+  // Start heartbeat in etcd.
+  grpc::Status StartHeartbeat(EtcdURL url,
+                              std::string own_addr,
+                              int own_port,
+                              aeEventLoop* el) {
+    auto channel =
+        grpc::CreateChannel(url.address, grpc::InsecureChannelCredentials());
+    etcd3::Client etcd(channel);
+
+    // Establish heartbeat.
+    int64_t lease_id;
+    {
+      etcd3::pb::LeaseGrantRequest req;
+      req.set_ttl(heartbeatTimeoutSec);
+      etcd3::pb::LeaseGrantResponse res;
+      auto status = etcd.LeaseGrant(req, &res);
+      if (!status.ok()) {
+        return status;
+      }
+      lease_id = res.id();
+    }
+
+    hb_info.lease_id = lease_id;
+    hb_info.etcd_url = url;
+    hb_info.channel = channel;
+    hb_info.last_beat = std::chrono::time_point_cast<Ms>(Clock::now());
+    // Schedule a heartbeat every 10 seconds.
+    aeCreateTimeEvent(el, 1000, &heartbeat, &hb_info, NULL);
+
+    {
+      etcd3::pb::PutRequest req;
+      auto own_addr_port = own_addr + ":" + std::to_string(own_port);
+      req.set_key(url.chain_prefix + "/heartbeat/" + own_addr_port);
+      req.set_value("unused");
+      req.set_lease(lease_id);
+      etcd3::pb::PutResponse res;
+      auto status = etcd.Put(req, &res);
+      if (!status.ok()) {
+        return status;
+      }
+    }
+
+    return grpc::Status::OK;
+  }
+
  private:
   std::string prev_address_;
   std::string prev_port_;
@@ -263,6 +354,7 @@ class RedisChainModule {
   std::string next_port_;
 
   std::unique_ptr<MasterClient> master_client_;
+  std::string master_url_;
 
   ChainRole chain_role_;
   enum GcsMode gcs_mode_;
@@ -327,7 +419,7 @@ int DoFlush(RedisModuleCtx* ctx,
             int64_t sn_right,
             int64_t sn_ckpt,
             const std::vector<std::string>& flushable_keys) {
-  CHECK(module.GcsMode() == RedisChainModule::GcsMode::kCkptFlush);
+  CHECK(module.GetGcsMode() == RedisChainModule::GcsMode::kCkptFlush);
 
   const int64_t old = module.key_to_sn().size();
 
@@ -478,7 +570,7 @@ int Put(RedisModuleCtx* ctx,
     const std::string key_str(ReadString(name));
     // NOTE(zongheng): this can be slow, see the note in class declaration.
     module.sn_to_key()[sn] = key_str;
-    if (module.GcsMode() == RedisChainModule::GcsMode::kCkptFlush) {
+    if (module.GetGcsMode() == RedisChainModule::GcsMode::kCkptFlush) {
       module.key_to_sn()[key_str] = sn;
     }
     module.record_sn(static_cast<int64_t>(sn));
@@ -551,6 +643,29 @@ int Put(RedisModuleCtx* ctx,
   // if (!module.ActAsHead()) {RedisModule_ReplyWithNull(ctx);}
   // RedisModule_ReplyWithLongLong(ctx,sn);
   return REDISMODULE_OK;
+}
+
+// Resend all unacked updates.
+int MemberResendUnacked_RedisCommand(RedisModuleCtx* ctx,
+                                     RedisModuleString** argv,
+                                     int argc) {
+  if (argc != 1) return RedisModule_WrongArity(ctx);
+  auto& sn_to_key = module.sn_to_key();
+  for (auto sn : module.sent()) {
+    auto sn_string = std::to_string(sn);
+    std::string key = sn_to_key[sn];
+    KeyReader reader(ctx, key);
+    size_t size;
+    const char* value = reader.value(&size);
+    if (!module.child()->err) {
+      const int status = redisAsyncCommand(
+          module.child(), NULL, NULL, "MEMBER.PROPAGATE %b %b %b %s",
+          key.data(), key.size(), value, size, sn_string.data(),
+          sn_string.size(), /*is_flush=*/kStringZero);
+      // TODO(zongheng): check status.
+    }
+  }
+  return RedisModule_ReplyWithNull(ctx);
 }
 
 // Set the role, successor and predecessor of this server.
@@ -648,17 +763,42 @@ int MemberSetRole_RedisCommand(RedisModuleCtx* ctx,
   return REDISMODULE_OK;
 }
 
+// Arguments:
+//  argv[1] = master URL (string): e.g. redis_host:port or etcd_host:port/prefix
+//  argv[2] = (OPTIONAL, etcd only) time between heartbeats in seconds
+//  argv[3] = (OPTIONAL, etcd only) time till heartbeat expires in seconds
 int MemberConnectToMaster_RedisCommand(RedisModuleCtx* ctx,
                                        RedisModuleString** argv,
                                        int argc) {
-  if (argc != 3) {
+  if (argc < 2) {
     return RedisModule_WrongArity(ctx);
   }
-  size_t size = 0;
-  const char* ptr = RedisModule_StringPtrLen(argv[1], &size);
-  long long port = 0;
-  RedisModule_StringToLongLong(argv[2], &port);
-  Status s = module.ConnectToMaster(std::string(ptr, size), port);
+
+  std::string master_url = ReadString(argv[1]);
+
+  if (module.GetMasterMode() == RedisChainModule::MasterMode::kEtcd) {
+    // Optional arguments for setting the heartbeat interval and timeout.
+    if (argc >= 4) {
+      RedisModule_StringToLongLong(argv[2], &heartbeatIntervalSec);
+      RedisModule_StringToLongLong(argv[3], &heartbeatTimeoutSec);
+    }
+
+    Status s = module.ConnectToMaster(master_url);
+
+    auto url = SplitEtcdURL(master_url);
+    std::string own_addr = "127.0.0.1";
+    char* bind_addr = getBindAddr();
+    if (bind_addr != NULL) {
+      own_addr = bind_addr;
+    }
+    module.StartHeartbeat(url, own_addr, getPort(), getEventLoop());
+    if (!s.ok()) return RedisModule_ReplyWithError(ctx, s.ToString().data());
+    return RedisModule_ReplyWithSimpleString(ctx, "OK");
+  }
+
+  // TODO gchao: There is some code duplication here but my refactorings keep
+  // turning out hard to read. DRY it out somehow.
+  Status s = module.ConnectToMaster(master_url);
   if (!s.ok()) return RedisModule_ReplyWithError(ctx, s.ToString().data());
   return RedisModule_ReplyWithSimpleString(ctx, "OK");
 }
@@ -863,7 +1003,7 @@ int TailCheckpoint_RedisCommand(RedisModuleCtx* ctx,
     return RedisModule_ReplyWithError(
         ctx, "ERR this command must be called on the tail.");
   }
-  if (module.GcsMode() == RedisChainModule::GcsMode::kNormal) {
+  if (module.GetGcsMode() == RedisChainModule::GcsMode::kNormal) {
     return RedisModule_ReplyWithError(
         ctx, "ERR redis server's GcsMode is set to kNormal.");
   }
@@ -941,7 +1081,7 @@ int HeadFlush_RedisCommand(RedisModuleCtx* ctx,
     return RedisModule_ReplyWithError(
         ctx, "ERR this command must be called on the head.");
   }
-  if (module.GcsMode() != RedisChainModule::GcsMode::kCkptFlush) {
+  if (module.GetGcsMode() != RedisChainModule::GcsMode::kCkptFlush) {
     return RedisModule_ReplyWithError(
         ctx, "ERR redis server's GcsMode is NOT set to kCkptFlush.");
   }
@@ -1104,12 +1244,13 @@ int RedisModule_OnLoad(RedisModuleCtx* ctx,
   default:
     return REDISMODULE_ERR;
   }
-  LOG(INFO) << "GcsMode: " << module.GcsModeString();
+  RedisModule_Log(ctx, "notice", "GCS mode: %s",
+                  module.GcsModeString().c_str());
 
   long long master_mode = 0;
   if (argc > 1) {
     CHECK_EQ(REDISMODULE_OK,
-             RedisModule_StringToLongLong(argv[0], &master_mode));
+             RedisModule_StringToLongLong(argv[1], &master_mode));
   }
   switch (master_mode) {
   case 0:
@@ -1121,7 +1262,8 @@ int RedisModule_OnLoad(RedisModuleCtx* ctx,
   default:
     return REDISMODULE_ERR;
   }
-  LOG(INFO) << "GcsMode: " << module.GcsModeString();
+  RedisModule_Log(ctx, "notice", "Master mode: %s",
+                  module.MasterModeString().c_str());
 
   // Register all commands.
 
@@ -1211,6 +1353,13 @@ int RedisModule_OnLoad(RedisModuleCtx* ctx,
   }
   if (RedisModule_CreateCommand(ctx, "MEMBER.SN", MemberSn_RedisCommand,
                                 "readonly",
+                                /*firstkey=*/-1, /*lastkey=*/-1,
+                                /*keystep=*/0) == REDISMODULE_ERR) {
+    return REDISMODULE_ERR;
+  }
+
+  if (RedisModule_CreateCommand(ctx, "MEMBER.RESEND_UNACKED",
+                                MemberResendUnacked_RedisCommand, "write",
                                 /*firstkey=*/-1, /*lastkey=*/-1,
                                 /*keystep=*/0) == REDISMODULE_ERR) {
     return REDISMODULE_ERR;

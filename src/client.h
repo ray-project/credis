@@ -64,7 +64,6 @@ class RedisClient {
                              redisCallbackFn* callback);
 
   // Does not transfer ownership.
-  redisContext* context() const { return context_; };
   redisAsyncContext* write_context() const { return write_context_; };
   redisAsyncContext* read_context() const { return read_context_; };
 
@@ -73,7 +72,6 @@ class RedisClient {
   // to the loop.  Not owned.
   aeEventLoop* loop_ = nullptr;
 
-  redisContext* context_ = nullptr;
   redisAsyncContext* write_context_ = nullptr;
   redisAsyncContext* read_context_ = nullptr;
   redisAsyncContext* ack_subscribe_context_ = nullptr;

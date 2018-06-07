@@ -2,8 +2,6 @@
 
 #include "glog/logging.h"
 
-// #include "utils.h"
-
 extern "C" {
 #include "hiredis/async.h"
 #include "hiredis/hiredis.h"

@@ -272,6 +272,8 @@ int MasterAdd_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
 // first.  We should enforce the contract that the Refresh calls are performed
 // only when clients detect disconnects.  The calls should forcibly remove the
 // head/tail.  Otherwise race conditions arise.
+// TODO(zongheng): after a month of originally writing the above, I don't
+// understand it anymore.
 
 // MASTER.REFRESH_HEAD: return the current head if non-faulty, otherwise
 // designate the child of the old head as the new head.

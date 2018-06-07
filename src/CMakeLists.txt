@@ -17,7 +17,6 @@ else()
   set(MALLOC_LIBRARY "${CMAKE_SOURCE_DIR}/redis/deps/jemalloc/lib/libjemalloc.a")
 endif()
 
-# set(REDIS_MODULE_CFLAGS -W -Wall -fno-common -g -ggdb -std=c++11)
 set(REDIS_MODULE_CFLAGS -W -Wall -fno-common -g -ggdb -std=c++11 -O2)
 if(APPLE)
   set(CMAKE_SHARED_LIBRARY_SUFFIX ".so")
@@ -34,14 +33,12 @@ target_link_libraries(timer glog::glog)
 # utils
 add_library(utils STATIC utils.cc)
 target_compile_options(utils PUBLIC ${REDIS_MODULE_CFLAGS} -fPIC)
-# target_link_libraries(utils ${REDIS_MODULE_LDFLAGS})
 
 # master_client
 add_library(master_client STATIC master_client.cc)
 target_compile_options(master_client PUBLIC ${REDIS_MODULE_CFLAGS} -fPIC)
 target_link_libraries(master_client ${LevelDB_LIBRARIES})
 target_link_libraries(master_client glog::glog)
-# target_link_libraries(master_client utils)
 
 # client
 add_library(client STATIC client.cc)

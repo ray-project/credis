@@ -6,13 +6,6 @@
 #define ReturnNotOk(s) \
   if (!s.ok()) return s;
 
-// namespace {
-// Status ReturnNotOk(const Status& s) {
-//   if (!s.ok()) return s;
-//   // Pass through;
-// }
-// }  // namespace
-
 // This is a global redis callback which will be registered for every
 // asynchronous redis call. It dispatches the appropriate callback
 // that was registered with the RedisCallbackManager.
@@ -55,7 +48,6 @@ RedisCallbackManager::RedisCallback& RedisCallbackManager::get(
   }
 
 RedisClient::~RedisClient() {
-  if (context_) redisFree(context_);
   if (write_context_) redisAsyncFree(write_context_);
   if (read_context_) redisAsyncFree(read_context_);
 }
@@ -64,26 +56,6 @@ constexpr int64_t kRedisDBConnectRetries = 50;
 constexpr int64_t kRedisDBWaitMilliseconds = 100;
 
 namespace {
-// The asynchronous context can hold a disconnect callback function that is
-// called when the connection is disconnected (either because of an error or per
-// user request). This function should have the following prototype:
-
-//    void(const redisAsyncContext *c, int status);
-// On a disconnect, the status argument is set to REDIS_OK when disconnection
-// was initiated by the user, or REDIS_ERR when the disconnection was caused by
-// an error. When it is REDIS_ERR, the err field in the context can be accessed
-// to find out the cause of the error.
-
-//   The context object is always freed after the disconnect callback fired.
-//   When a reconnect is needed, the disconnect callback is a good point to do
-//   so.
-
-//  Setting the disconnect callback can only be done once per context. For
-//  subsequent calls it will return REDIS_ERR. The function to set the
-//  disconnect callback has the following prototype:
-
-// int redisAsyncSetDisconnectCallback(redisAsyncContext *ac,
-// redisDisconnectCallback *fn);
 
 void RedisDisconnectCallback(const redisAsyncContext* c, int status) {
   if (status == REDIS_OK) {
@@ -119,34 +91,11 @@ Status ConnectContext(const std::string& address, int port,
   *context = ctx;
   return Status::OK();
 }
+
 }  // namespace
 
 Status RedisClient::Connect(const std::string& address, int write_port,
                             int ack_port) {
-  // int connection_attempts = 0;
-  // context_ = redisConnect(address.c_str(), write_port);
-  // while (context_ == nullptr || context_->err) {
-  //   if (connection_attempts >= kRedisDBConnectRetries) {
-  //     if (context_ == nullptr) {
-  //       LOG(ERROR) << "Could not allocate redis context.";
-  //     }
-  //     if (context_->err) {
-  //       LOG(ERROR) << "Could not establish connection to redis " << address
-  //                  << ":" << write_port;
-  //     }
-  //     CHECK(0);
-  //     break;
-  //   }
-  //   LOG(ERROR) << "Failed to connect to Redis, retrying.";
-  //   // Sleep for a little.
-  //   usleep(kRedisDBWaitMilliseconds * 1000);
-  //   context_ = redisConnect(address.c_str(), write_port);
-  //   connection_attempts += 1;
-  // }
-  // redisReply* reply = reinterpret_cast<redisReply*>(
-  //     redisCommand(context_, "CONFIG SET notify-keyspace-events Kl"));
-  // REDIS_CHECK_ERROR(context_, reply);
-
   // Connect to async contexts.
   CHECK(ConnectContext(address, write_port, &write_context_).ok());
   CHECK(ConnectContext(address, ack_port, &read_context_).ok());
@@ -174,11 +123,6 @@ Status RedisClient::ReconnectAckContext(const std::string& address, int port,
 Status RedisClient::ConnectHead(const std::string& address, int port) {
   CHECK(write_context_ == nullptr);
   ReturnNotOk(ConnectContext(address, port, &write_context_));
-
-  // // TODO(zongheng): remove these!!
-  // redisAsyncDisconnect(write_context_);
-  // ReturnNotOk(ConnectContext(address, port, &write_context_));
-
   return Status::OK();
 }
 
@@ -187,15 +131,6 @@ Status RedisClient::ConnectTail(const std::string& address, int port) {
   CHECK(ack_subscribe_context_ == nullptr);
   ReturnNotOk(ConnectContext(address, port, &read_context_));
   ReturnNotOk(ConnectContext(address, port, &ack_subscribe_context_));
-
-  // // TODO(zongheng): remove these!!
-  // redisAsyncDisconnect(read_context_);
-  // ReturnNotOk(ConnectContext(address, port, &read_context_));
-  // redisAsyncDisconnect(ack_subscribe_context_);
-  // ReturnNotOk(ConnectContext(address, port, &ack_subscribe_context_));
-
-  // CHECK(ConnectContext(address, port, &read_context_).ok());
-  // CHECK(ConnectContext(address, port, &ack_subscribe_context_).ok());
   return Status::OK();
 }
 

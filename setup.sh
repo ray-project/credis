@@ -14,6 +14,15 @@ gcs_ckptflush=2
 gcs_mode=${gcs_ckptflush}
 gcs_mode=${gcs_normal}
 
+if [ "$(uname)" == "Darwin" ]; then
+    myip=$(curl ipinfo.io/ip 2>/dev/null)
+    myip="127.0.0.1"  # Assume local development
+    maybe_taskset=""
+else
+    myip=$(hostname -i)
+    maybe_taskset="taskset 0x1"
+fi
+
 function setup() {
     pushd build
     make -j
@@ -26,10 +35,8 @@ function setup() {
 
     sleep 2
 
-    # myip=$(curl ipinfo.io/ip 2>/dev/null)
-    myip=$(hostname -i)
     for i in $(seq 1 $NUM_NODES); do
-      taskset 0x1 \
+      ${maybe_taskset} \
               ./redis/src/redis-server --loadmodule ./build/src/libmember.so ${gcs_mode} --port $port --protected-mode no &> $port.log &
 
       sleep 2

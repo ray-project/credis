@@ -169,8 +169,8 @@ int Put(RedisModuleCtx* ctx, RedisModuleString* name, RedisModuleString* data,
         RedisModuleString* client_id, long long sn) {
   RedisModuleKey* key = reinterpret_cast<RedisModuleKey*>(
       RedisModule_OpenKey(ctx, name, REDISMODULE_WRITE));
-  CHECK(REDISMODULE_OK == RedisModule_StringSet(key, data))
-      << "key " << key << " sn " << sn;
+  CHECK(REDISMODULE_OK == RedisModule_StringSet(key, data)) << "key " << key
+                                                            << " sn " << sn;
   RedisModule_CloseKey(key);
 
   // State maintenance.
@@ -202,6 +202,7 @@ int Put(RedisModuleCtx* ctx, RedisModuleString* name, RedisModuleString* data,
     RedisModule_Publish(client_id, s);
     RedisModule_FreeString(ctx, s);
 
+    // NOTE(zongheng): this can be commented out for 1-node chain.
     // if (module.parent()) {
     //  RedisModuleCallReply* reply =
     //      RedisModule_Call(ctx, "MEMBER.ACK", "c", seqnum_str.c_str());
@@ -229,7 +230,7 @@ int Put(RedisModuleCtx* ctx, RedisModuleString* name, RedisModuleString* data,
           key_len, val_ptr, val_len, seqnum_str.data(), seqnum_str.size(),
           cid_ptr, cid_len);
       // TODO(zongheng): check status.
-      // LOG_EVERY_N(INFO, 999999999) << "Done";
+      // NOTE(zongheng): this can be commented out for 1-node chain.
       // module.sent().insert(sn);
     } else {
       // TODO(zongheng): this case is incompletely handled, i.e. "failure of a
@@ -579,26 +580,6 @@ int MemberReplicate_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
     //
     // Schema of the whole command:
     //   MEMBER.NO_PROP_BATCHED_PUT <num_entries> <blob>
-
-    // std::stringstream ss;
-    // int cnt = 0;
-    // // NOTE(zongheng): we basically use "sn_to_key" to iterate through
-    // // in-memory state for convenience only.  Presumably, we can rely on some
-    // // other mechanisms, such as redis' native iterator, to do this.
-    // for (auto element : module.sn_to_key()) {
-    //   KeyReader reader(ctx, element.second);
-    //   size_t key_size, value_size;
-    //   const char* key_data = reader.key(&key_size);
-    //   const char* value_data = reader.value(&value_size);
-    //   const std::string sn = std::to_string(element.first);
-    //   ss << key_data << " " << value_data << " " << sn;
-    //   if (cnt + 1 < num_entries) {
-    //     ss << " ";
-    //   }
-    //   ++cnt;
-    // }
-    // const std::string blob = ss.str();
-
     std::string blob;
     static constexpr int kKeySize = 25;
     static constexpr int kValSize = 512;
@@ -651,6 +632,7 @@ int MemberAck_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
   std::string sn = ReadString(argv[1]);
   // LOG_EVERY_N(INFO, 999999999)
   //     << "Erasing sequence number " << sn << " from sent list";
+  // NOTE(zongheng): this can be commented out for 1-node chain.
   // module.sent().erase(std::stoi(sn));
   if (module.parent()) {
     // LOG_EVERY_N(INFO, 999999999) << "Propagating the ACK up the chain";
@@ -953,7 +935,7 @@ int RedisModule_OnLoad(RedisModuleCtx* ctx, RedisModuleString** argv,
     default:
       return REDISMODULE_ERR;
   }
-  LOG(INFO) << "GcsMode: " << module.gcs_mode_string();
+  LOG(INFO) << "MasterMode: " << module.master_mode_string();
 
   // Register all commands.
 

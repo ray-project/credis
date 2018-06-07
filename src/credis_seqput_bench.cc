@@ -170,8 +170,8 @@ void SeqPutCallback(redisAsyncContext* write_context,  // != ack_context.
     // generate arbitrary seqnums, not just nonnegative numbers.  Although,
     // hiredis / redis might have undiscovered issues with a redis module
     // command not replying anything...)
-    CHECK(assigned_seqnum >= writes_completed)
-        << assigned_seqnum << " " << writes_completed;
+    CHECK(assigned_seqnum >= writes_completed) << assigned_seqnum << " "
+                                               << writes_completed;
     inflight_write.seqnum = assigned_seqnum;
     assigned_seqnums.insert(assigned_seqnum);
   }
@@ -257,6 +257,7 @@ void SeqGetCallback(redisAsyncContext* context, void* r, void* /*privdata*/) {
     // TODO(zongheng): nil means the client reads a committed key but the store
     // returns not found.  One situation this can happen is, the state transfer
     // has not completed.
+    // TODO(zongheng): check TODO/FIXME in {master,member}.cc.
     LOG(INFO) << "Received nil TODO: this is a bug, but client can get around "
                  "this by ignoring & waiting a bit and retry...";
     LOG(INFO) << " *** ignoring NotFound, testing lower bound";
@@ -264,6 +265,7 @@ void SeqGetCallback(redisAsyncContext* context, void* r, void* /*privdata*/) {
                          /*is_write=*/false);
     return;
   } else if (inflight_read.key_index == -1) {
+    // TODO(zongheng): check TODO/FIXME in {master,member}.cc.
     LOG(INFO) << "inflight_read.key_index == -1 but SeqGetCallback fired, "
                  "ignored.. TODO: this is a bug, but client can get around "
                  "this by ignoring & waiting a bit and retry...";
@@ -498,17 +500,8 @@ int main(int argc, char** argv) {
   acked_values.reserve(N);
 
   client = std::make_shared<RedisClient>();
-  CHECK(client->write_context() == nullptr);
-  CHECK(client->read_context() == nullptr);
   CHECK(client->ConnectHead(head_server, write_port).ok());
   CHECK(client->ConnectTail(tail_server, ack_port).ok());
-
-  // leveldb::Status s;
-  // s = client->ConnectHead(head_server, write_port);
-  // CHECK(s.ok()) << s.ToString();
-  // CHECK(client->read_context() == nullptr);
-  // s = client->ConnectTail(tail_server, ack_port);
-  // CHECK(s.ok()) << s.ToString();
 
   CHECK(client->AttachToEventLoop(loop).ok());
   master_client = std::make_shared<RedisMasterClient>();

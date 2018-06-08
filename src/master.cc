@@ -50,27 +50,32 @@ using Status = leveldb::Status;  // So that it can be easily replaced.
 
 namespace {
 
+// TODO(zongheng): caller of this function doesn't use it correctly.
 // Handle failure for redis module command as caller, hiredis context as callee.
-int ReplyIfFailure(RedisModuleCtx* rm_ctx,
-                   redisContext* ctx,
+int ReplyIfFailure(RedisModuleCtx* rm_ctx, redisContext* ctx,
                    redisReply* reply) {
   if (reply == NULL) {
+    CHECK(0);
     return RedisModule_ReplyWithError(rm_ctx, ctx->errstr);
   } else if (reply->type == REDIS_REPLY_ERROR) {
+    CHECK(0);
     return RedisModule_ReplyWithError(rm_ctx, reply->str);
+  } else if (reply->type == REDIS_REPLY_STATUS) {
+    LOG(INFO) << std::string(reply->str, reply->len);
+  } else if (reply->type == REDIS_REPLY_NIL) {
+    // LOG(INFO) << "nil reply";
+  } else if (reply->type == REDIS_REPLY_STRING) {
+    LOG(INFO) << std::string(reply->str, reply->len);
   }
+  return 0;
 }
 
 }  // anonymous namespace
 
-Status SetRole(redisContext* context,
-               const std::string& role,
-               const std::string& prev_address,
-               const std::string& prev_port,
-               const std::string& next_address,
-               const std::string& next_port,
-               long long* sn_result,
-               long long sn = -1,
+Status SetRole(redisContext* context, const std::string& role,
+               const std::string& prev_address, const std::string& prev_port,
+               const std::string& next_address, const std::string& next_port,
+               long long* sn_result, long long sn = -1,
                long long drop_writes = 0) {
   const std::string sn_string = std::to_string(sn);
   const std::string drop_writes_string = std::to_string(drop_writes);
@@ -96,6 +101,11 @@ Status SetRole(redisContext* context,
   }
 }
 
+// TODO(zongheng): as it's currently implemented, MemberReplicate is NOT
+// synchronous at the moment, so this presents a race. E.g., state transfer is
+// still underway to the new tail, but step (3) below has already issued namely
+// telling the new tail to start serving reads.
+
 // Handling node addition at the end of chain.
 //
 // We follow the protocol outlined at the end of Section 3 of the paper.
@@ -118,8 +128,7 @@ Status SetRole(redisContext* context,
 // Add a new replica to the chain
 // argv[1] is the IP address of the replica to be added
 // argv[2] is the port of the replica to be added
-int MasterAdd_RedisCommand(RedisModuleCtx* ctx,
-                           RedisModuleString** argv,
+int MasterAdd_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
                            int argc) {
   if (argc != 3) {
     return RedisModule_WrongArity(ctx);
@@ -164,10 +173,15 @@ int MasterAdd_RedisCommand(RedisModuleCtx* ctx,
 
     if (size > 0) {
       // TODO(pcm): Execute Sent_T requests
-      LOG(INFO) << "Replicating the tail.";
-      redisReply* reply = reinterpret_cast<redisReply*>(
+      LOG(INFO) << "Replicating from old tail to the new tail.";
+      LOG(INFO) << "old tail's port " << found_tail.context->tcp.port;
+      redisReply* reply;
+      reply = reinterpret_cast<redisReply*>(
           redisCommand(found_tail.context, "MEMBER.REPLICATE"));
       ReplyIfFailure(ctx, found_tail.context, reply);
+      CHECK(reply->type == REDIS_REPLY_INTEGER);
+      LOG(INFO) << "Reply of MEMBER.REPLICATE (duration in ms): "
+                << reply->integer;
       freeReplyObject(reply);
 
       LOG(INFO) << "Setting new tail.";
@@ -254,13 +268,19 @@ int MasterAdd_RedisCommand(RedisModuleCtx* ctx,
 //   return RedisModule_ReplyWithNull(ctx);
 // }
 
+// TODO(zongheng): I think it's incorrect in Refresh{Head,Tail} to reconnect
+// first.  We should enforce the contract that the Refresh calls are performed
+// only when clients detect disconnects.  The calls should forcibly remove the
+// head/tail.  Otherwise race conditions arise.
+// TODO(zongheng): after a month of originally writing the above, I don't
+// understand it anymore.
+
 // MASTER.REFRESH_HEAD: return the current head if non-faulty, otherwise
 // designate the child of the old head as the new head.
 //
 // Returns, as a string, "<new head addr>:<new head port>".
 int MasterRefreshHead_RedisCommand(RedisModuleCtx* ctx,
-                                   RedisModuleString** argv,
-                                   int argc) {
+                                   RedisModuleString** argv, int argc) {
   REDISMODULE_NOT_USED(argv);
   if (argc != 1) {
     return RedisModule_WrongArity(ctx);
@@ -304,8 +324,7 @@ int MasterRefreshHead_RedisCommand(RedisModuleCtx* ctx,
 // MASTER.REFRESH_TAIL: similar to MASTER.REFRESH_HEAD, but for getting the
 // up-to-date tail.
 int MasterRefreshTail_RedisCommand(RedisModuleCtx* ctx,
-                                   RedisModuleString** argv,
-                                   int argc) {
+                                   RedisModuleString** argv, int argc) {
   REDISMODULE_NOT_USED(argv);
   if (argc != 1) {
     return RedisModule_WrongArity(ctx);
@@ -344,8 +363,7 @@ int MasterRefreshTail_RedisCommand(RedisModuleCtx* ctx,
 }
 
 // Return the current view of the chain.
-int MasterGetChain_RedisCommand(RedisModuleCtx* ctx,
-                                RedisModuleString** argv,
+int MasterGetChain_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
                                 int argc) {
   REDISMODULE_NOT_USED(argv);
   if (argc != 1) return RedisModule_WrongArity(ctx);
@@ -360,8 +378,7 @@ int MasterGetChain_RedisCommand(RedisModuleCtx* ctx,
   return REDISMODULE_OK;
 }
 
-int MasterTest_RedisCommand(RedisModuleCtx* ctx,
-                            RedisModuleString** argv,
+int MasterTest_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
                             int argc) {
   if (argc != 1) {
     return RedisModule_WrongArity(ctx);
@@ -383,8 +400,7 @@ int MasterTest_RedisCommand(RedisModuleCtx* ctx,
 
 extern "C" {
 
-int RedisModule_OnLoad(RedisModuleCtx* ctx,
-                       RedisModuleString** argv,
+int RedisModule_OnLoad(RedisModuleCtx* ctx, RedisModuleString** argv,
                        int argc) {
   FLAGS_logtostderr = 1;  // By default glog uses log files in /tmp.
   ::google::InitGoogleLogging("libmaster");

@@ -28,6 +28,22 @@ void DisconnectCallback(const redisAsyncContext* /*context*/, int /*status*/) {
   // "context" will be freed by hiredis.  Quote: "The context object is always
   // freed after the disconnect callback fired."
 }
+void RedisDisconnectCallback(const redisAsyncContext* c, int status) {
+  // if (status == REDIS_OK) {
+  //   // Normal execution, program exit.
+  //   //
+  //   // In this case, this callback seems to fire after glog finishes its
+  //   // own teardown. So LOG(INFO) cannot be used here.
+  //   return;
+  // }
+  LOG(INFO) << "Disconnected redisAsyncContext to remote port "
+            << c->c.tcp.port;
+  LOG(INFO) << "Error: " << c->errstr;
+  LOG(INFO) << "Remote host " << c->c.tcp.host;
+  // The context object is always freed after the disconnect callback fired.
+  // When a reconnect is needed, the disconnect callback is a good point to do
+  // so.
+}
 
 redisAsyncContext* AsyncConnect(const std::string& address, int port) {
   redisAsyncContext* c = redisAsyncConnect(address.c_str(), port);
@@ -40,7 +56,8 @@ redisAsyncContext* AsyncConnect(const std::string& address, int port) {
     }
     return NULL;
   }
-  redisAsyncSetDisconnectCallback(c, &DisconnectCallback);
+  CHECK(redisAsyncSetDisconnectCallback(c, &RedisDisconnectCallback) ==
+        REDIS_OK);
   return c;
 }
 
@@ -99,14 +116,14 @@ class RedisChainModule {
   }
   std::string gcs_mode_string() const {
     switch (gcs_mode_) {
-    case GcsMode::kNormal:
-      return "kNormal";
-    case GcsMode::kCkptOnly:
-      return "kCkptOnly";
-    case GcsMode::kCkptFlush:
-      return "kCkptFlush";
-    default:
-      CHECK(false);
+      case GcsMode::kNormal:
+        return "kNormal";
+      case GcsMode::kCkptOnly:
+        return "kCkptOnly";
+      case GcsMode::kCkptFlush:
+        return "kCkptFlush";
+      default:
+        CHECK(false);
     }
   }
 
@@ -122,12 +139,12 @@ class RedisChainModule {
   }
   std::string master_mode_string() const {
     switch (master_mode_) {
-    case MasterMode::kRedis:
-      return "kRedis";
-    case MasterMode::kEtcd:
-      return "kEtcd";
-    default:
-      CHECK(false);
+      case MasterMode::kRedis:
+        return "kRedis";
+      case MasterMode::kEtcd:
+        return "kEtcd";
+      default:
+        CHECK(false);
     }
   }
 
@@ -138,13 +155,13 @@ class RedisChainModule {
         parent_(NULL),
         child_(NULL) {
     switch (master_mode_) {
-    case MasterMode::kRedis:
-      master_client_ = std::unique_ptr<MasterClient>(new RedisMasterClient());
-      break;
-    case MasterMode::kEtcd:
-      CHECK(false) << "Etcd master client is unimplemented";
-    default:
-      CHECK(false) << "Unrecognized master mode " << master_mode_string();
+      case MasterMode::kRedis:
+        master_client_ = std::unique_ptr<MasterClient>(new RedisMasterClient());
+        break;
+      case MasterMode::kEtcd:
+        CHECK(false) << "Etcd master client is unimplemented";
+      default:
+        CHECK(false) << "Unrecognized master mode " << master_mode_string();
     }
   }
 
@@ -153,31 +170,34 @@ class RedisChainModule {
     if (parent_) redisAsyncFree(parent_);
   }
 
-  void Reset(std::string& prev_address,
-             std::string& prev_port,
-             std::string& next_address,
-             std::string& next_port) {
-    prev_address_ = prev_address;
-    prev_port_ = prev_port;
-    next_address_ = next_address;
-    next_port_ = next_port;
+  void Reset(const std::string& prev_address, const std::string& prev_port,
+             const std::string& next_address, const std::string& next_port) {
+    if (!next_address.empty()) {
+      next_address_ = next_address;
+      next_port_ = next_port;
 
-    // If "c->err" is present, the disconnect callback should've already free'd
-    // the async context.
-    if (child_ && !child_->err) {
-      redisAsyncDisconnect(child_);
-    }
-    if (parent_ && !parent_->err) {
-      redisAsyncDisconnect(parent_);
+      // If "c->err" is present, the disconnect callback should've already
+      // free'd the async context.
+      if (child_ && !child_->err) {
+        redisAsyncDisconnect(child_);
+      }
+      child_ = nullptr;
+      if (next_address != "nil") {
+        child_ = AsyncConnect(next_address, std::stoi(next_port));
+      }
     }
 
-    child_ = NULL;
-    parent_ = NULL;
-    if (next_address != "nil") {
-      child_ = AsyncConnect(next_address, std::stoi(next_port));
-    }
-    if (prev_address != "nil") {
-      parent_ = AsyncConnect(prev_address, std::stoi(prev_port));
+    if (!prev_address.empty()) {
+      prev_address_ = prev_address;
+      prev_port_ = prev_port;
+
+      if (parent_ && !parent_->err) {
+        redisAsyncDisconnect(parent_);
+      }
+      parent_ = nullptr;
+      if (prev_address != "nil") {
+        parent_ = AsyncConnect(prev_address, std::stoi(prev_port));
+      }
     }
   }
 
@@ -242,18 +262,15 @@ class RedisChainModule {
       std::function<int(RedisModuleCtx*, RedisModuleString**, int)>;
   // Runs "node_func" on every node in the chain; after the tail node has run it
   // too, finalizes the mutation by running "tail_func".
-  using NodeFunc = std::function<int(
-      RedisModuleCtx*, RedisModuleString**, int, RedisModuleString**)>;
+  using NodeFunc = std::function<int(RedisModuleCtx*, RedisModuleString**, int,
+                                     RedisModuleString**)>;
   using TailFunc =
       std::function<int(RedisModuleCtx*, RedisModuleString**, int)>;
 
   // Runs "node_func" on every node in the chain; after the tail node has run it
   // too, finalizes the mutation by running "tail_func".
-  int ChainReplicate(RedisModuleCtx* ctx,
-                     RedisModuleString** argv,
-                     int argc,
-                     NodeFunc node_func,
-                     TailFunc tail_func);
+  int ChainReplicate(RedisModuleCtx* ctx, RedisModuleString** argv, int argc,
+                     NodeFunc node_func, TailFunc tail_func);
 
  private:
   std::string prev_address_;
@@ -302,19 +319,13 @@ class RedisChainModule {
   // Drop writes.  Used when adding a child which acts as the new tail.
   bool drop_writes_ = false;
 
-  int MutateHelper(RedisModuleCtx* ctx,
-                   RedisModuleString** argv,
-                   int argc,
-                   NodeFunc node_func,
-                   TailFunc tail_func,
-                   int sn);
+  int MutateHelper(RedisModuleCtx* ctx, RedisModuleString** argv, int argc,
+                   NodeFunc node_func, TailFunc tail_func, int sn);
 };
 
 int RedisChainModule::MutateHelper(RedisModuleCtx* ctx,
-                                   RedisModuleString** argv,
-                                   int argc,
-                                   NodeFunc node_func,
-                                   TailFunc tail_func,
+                                   RedisModuleString** argv, int argc,
+                                   NodeFunc node_func, TailFunc tail_func,
                                    int sn) {
   // Node function.  Retrieve the mutated key.
   RedisModuleString* redis_key_str = nullptr;
@@ -341,10 +352,8 @@ int RedisChainModule::MutateHelper(RedisModuleCtx* ctx,
 }
 
 int RedisChainModule::ChainReplicate(RedisModuleCtx* ctx,
-                                     RedisModuleString** argv,
-                                     int argc,
-                                     NodeFunc node_func,
-                                     TailFunc tail_func) {
+                                     RedisModuleString** argv, int argc,
+                                     NodeFunc node_func, TailFunc tail_func) {
   CHECK(Role() == RedisChainModule::ChainRole::kSingleton)
       << "ChainReplicate() API supports 1-node mode only for now due to "
          "insufficient "

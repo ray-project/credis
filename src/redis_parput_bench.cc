@@ -34,8 +34,8 @@ int main() {
   }
   aeMain(loop);
   auto end = std::chrono::system_clock::now();
-  CHECK(num_completed == N)
-      << "num_completed " << num_completed << " vs N " << N;
+  CHECK(num_completed == N) << "num_completed " << num_completed << " vs N "
+                            << N;
   LOG(INFO) << "ending bench";
 
   const int64_t latency_us =

@@ -1,3 +1,6 @@
+#include "timer.h"
+
+#include <algorithm>
 #include <cmath>
 #include <string>
 
@@ -6,7 +9,27 @@
 
 #include "glog/logging.h"
 
-#include "timer.h"
+void Timer::ToFile(const std::string& path, bool is_append) const {
+  CHECK(begin_timestamps_.size() == latency_micros_.size())
+      << begin_timestamps_.size() << " " << latency_micros_.size();
+  std::ios_base::openmode mode = std::ios_base::out;
+  if (is_append) mode = std::ios_base::app;
+  std::ofstream ofs(path, mode);
+
+  if (!is_append) ofs << "begin_timestamp_us,latency_us" << std::endl;
+
+  for (int i = 0; i < begin_timestamps_.size(); ++i) {
+    ofs << static_cast<int64_t>(begin_timestamps_[i]) << ","
+        << latency_micros_[i] << std::endl;
+  }
+}
+
+double Timer::Min() const {
+  return *std::min_element(latency_micros_.begin(), latency_micros_.end());
+}
+double Timer::Max() const {
+  return *std::max_element(latency_micros_.begin(), latency_micros_.end());
+}
 
 Timer Timer::Merge(Timer& timer1, Timer& timer2) {
   Timer t;
@@ -16,13 +39,20 @@ Timer Timer::Merge(Timer& timer1, Timer& timer2) {
   lat.reserve(lat1.size() + lat2.size());
   lat.insert(lat.end(), lat1.begin(), lat1.end());
   lat.insert(lat.end(), lat2.begin(), lat2.end());
+
+  auto& timestamps = t.begin_timestamps();
+  auto& timestamps1 = timer1.begin_timestamps();
+  auto& timestamps2 = timer2.begin_timestamps();
+  timestamps.reserve(timestamps1.size() + timestamps2.size());
+  timestamps.insert(timestamps.end(), timestamps1.begin(), timestamps1.end());
+  timestamps.insert(timestamps.end(), timestamps2.begin(), timestamps2.end());
   return t;
 }
 
 double Timer::NowMicrosecs() const {
   struct timeval time;
   gettimeofday(&time, NULL);
-  return (double) time.tv_sec * 1e6 + (double) time.tv_usec;
+  return (double)time.tv_sec * 1e6 + (double)time.tv_usec;
 }
 
 void Timer::ExpectOps(int N) {
@@ -41,8 +71,8 @@ double Timer::TimeOpBegin() {
 void Timer::TimeOpEnd(int num_completed) {
   const double now = NowMicrosecs();
   CHECK(latency_micros_.size() == num_completed - 1);
-  CHECK(begin_timestamps_.size() == num_completed)
-      << begin_timestamps_.size() << " " << num_completed;
+  CHECK(begin_timestamps_.size() == num_completed) << begin_timestamps_.size()
+                                                   << " " << num_completed;
   latency_micros_.push_back(now - begin_timestamps_.back());
 }
 
@@ -73,6 +103,20 @@ std::string Timer::ReportStats(const std::string& name) const {
   msg += " num ";
   msg += std::to_string(latency_micros_.size());
   return msg;
+}
+
+void Timer::DropFirst(int n) {
+  if (begin_timestamps_.size() < n) return;
+  begin_timestamps_.erase(begin_timestamps_.begin(),
+                          begin_timestamps_.begin() + n);
+  latency_micros_.erase(latency_micros_.begin(), latency_micros_.begin() + n);
+}
+
+void Timer::WriteToFile(const std::string& path) const {
+  ToFile(path, /*is_append=*/false);
+}
+void Timer::AppendToFile(const std::string& path) const {
+  ToFile(path, /*is_append=*/true);
 }
 
 std::vector<double>& Timer::begin_timestamps() { return begin_timestamps_; }

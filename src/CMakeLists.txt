@@ -78,7 +78,7 @@ target_link_libraries(credis_seqput_bench glog::glog client
   ${CMAKE_SOURCE_DIR}/redis/deps/hiredis/libhiredis.a
   ${CMAKE_SOURCE_DIR}/redis/src/ae.o
   ${CMAKE_SOURCE_DIR}/redis/src/zmalloc.o
-  ${MALLOC_LIBRARY} timer)
+  ${MALLOC_LIBRARY} timer master_client)
 
 add_executable(redis_parput_bench redis_parput_bench.cc)
 target_link_libraries(redis_parput_bench glog::glog client

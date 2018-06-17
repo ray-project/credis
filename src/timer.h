@@ -8,8 +8,9 @@
 // For sequential queries only (i.e., launch next after current finishes).
 class Timer {
  public:
+  static double NowMicrosecs();
+
   static Timer Merge(Timer& timer1, Timer& timer2);
-  double NowMicrosecs() const;
 
   void ExpectOps(int N);
 

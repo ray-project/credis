@@ -47,12 +47,14 @@ class GcsModeTests(unittest.TestCase):
         # By default, the execution mode is kNormal, which disallows flush/ckpt.
         with self.assertRaises(redis.exceptions.ResponseError) as ctx:
             self.ack_client.execute_command('TAIL.CHECKPOINT')
-        self.assertTrue('GcsMode is set to kNormal' in str(ctx.exception))
+            self.assertTrue('GcsMode indicates no checkpointing support' in
+                            str(ctx.exception))
 
         with self.assertRaises(redis.exceptions.ResponseError) as ctx:
             self.head_client.execute_command('HEAD.FLUSH')
+        print(str(ctx.exception))
         self.assertTrue(
-            'GcsMode is NOT set to kCkptFlush' in str(ctx.exception))
+            'GcsMode indicates no flushing support' in str(ctx.exception))
 
     def testCkptOnly(self):
         common.Start(gcs_mode=common.GCS_CKPTONLY)
@@ -60,8 +62,9 @@ class GcsModeTests(unittest.TestCase):
 
         with self.assertRaises(redis.exceptions.ResponseError) as ctx:
             self.head_client.execute_command('HEAD.FLUSH')
+        print(str(ctx.exception))
         self.assertTrue(
-            'GcsMode is NOT set to kCkptFlush' in str(ctx.exception))
+            'GcsMode indicates no flushing support' in str(ctx.exception))
 
     def testCkptFlush(self):
         common.Start(gcs_mode=common.GCS_CKPTFLUSH)
@@ -121,6 +124,22 @@ class CheckpointFlush(unittest.TestCase):
         self.assertIsNone(self.ack_client.execute_command('GET k1'))
         # READ is credis' read mechanism, can read checkpoints.
         self.assertEqual(b'v3', self.ack_client.execute_command('READ k1'))
+
+    def testFlushOnly(self):
+        common.Start(gcs_mode=common.GCS_FLUSHONLYUNSAFE)
+
+        self.head_client.execute_command('MEMBER.PUT', 'k1', 'v1', _CLIENT_ID)
+        self.assertEqual(1, self.head_client.execute_command('HEAD.FLUSH'))
+        self.head_client.execute_command('MEMBER.PUT', 'k1', 'v1', _CLIENT_ID)
+        self.head_client.execute_command('MEMBER.PUT', 'k1', 'v1', _CLIENT_ID)
+        self.head_client.execute_command('MEMBER.PUT', 'k1', 'v1', _CLIENT_ID)
+        self.assertEqual(3, self.head_client.execute_command('HEAD.FLUSH'))
+        self.assertEqual(0, self.head_client.execute_command('HEAD.FLUSH'))
+        self.head_client.execute_command('MEMBER.PUT', 'k2', 'v2', _CLIENT_ID)
+        self.assertEqual(1, self.head_client.execute_command('HEAD.FLUSH'))
+
+        # Nothing in the keyspace.
+        self.assertEqual([], self.head_client.execute_command('KEYS *'))
 
 
 if __name__ == "__main__":

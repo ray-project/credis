@@ -49,7 +49,7 @@ Timer Timer::Merge(Timer& timer1, Timer& timer2) {
   return t;
 }
 
-double Timer::NowMicrosecs() const {
+double Timer::NowMicrosecs() {
   struct timeval time;
   gettimeofday(&time, NULL);
   return (double)time.tv_sec * 1e6 + (double)time.tv_usec;

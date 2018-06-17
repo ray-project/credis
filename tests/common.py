@@ -17,6 +17,7 @@ MAX_USED_PORT = max(PORTS)  # For picking the next port.
 GCS_NORMAL = 0
 GCS_CKPTONLY = 1
 GCS_CKPTFLUSH = 2
+GCS_FLUSHONLYUNSAFE = 3
 
 
 def MakeChain(num_nodes=2):

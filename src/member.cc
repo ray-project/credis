@@ -792,9 +792,10 @@ int HeadFlush_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
   // Additionally we take into account (1) reasonably-sized batch, (2) max
   // seqnum seen.
   // In summary, the eligible range is [sn_flushed, sn_bound).
-  const int64_t sn_bound =
-      std::min(module.sn() + 1,
-               std::min(sn_flushed + max_num_entries_to_flush, sn_ckpt));
+  const int64_t sn_bound = std::min(
+      module.sn() + 1,
+      std::min(sn_flushed + static_cast<int64_t>(max_num_entries_to_flush),
+               sn_ckpt));
   DLOG(INFO) << "module.sn() " << module.sn() << "; max_num_entries_to_flush "
              << max_num_entries_to_flush << "; sn_bound " << sn_bound;
   std::vector<std::string> flushable_keys;

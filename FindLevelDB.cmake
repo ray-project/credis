@@ -18,8 +18,8 @@ find_path(LevelDB_INCLUDE NAMES leveldb/db.h
                           DOC "Path in which the file leveldb/db.h is located." )
 
 # Look for the library.
-find_library(LevelDB_LIBRARY NAMES leveldb
-                             PATHS ${LEVELDB_ROOT}/build ${LEVELDB_ROOT}
+find_library(LevelDB_LIBRARY NAMES libleveldb.a
+                             PATHS ${LEVELDB_ROOT}/build
                              DOC "Path to leveldb library." )
 
 include(FindPackageHandleStandardArgs)

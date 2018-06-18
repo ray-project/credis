@@ -14,12 +14,12 @@ set(LEVELDB_ROOT "${CMAKE_SOURCE_DIR}/leveldb")
 
 # Look for the header file.
 find_path(LevelDB_INCLUDE NAMES leveldb/db.h
-                          PATHS ${LEVELDB_ROOT}/include /opt/local/include /usr/local/include /usr/include
+                          PATHS ${LEVELDB_ROOT}/include
                           DOC "Path in which the file leveldb/db.h is located." )
 
 # Look for the library.
 find_library(LevelDB_LIBRARY NAMES leveldb
-                             PATHS ${LEVELDB_ROOT}/build ${LEVELDB_ROOT} /usr/local/lib /usr/lib
+                             PATHS ${LEVELDB_ROOT}/build ${LEVELDB_ROOT}
                              DOC "Path to leveldb library." )
 
 include(FindPackageHandleStandardArgs)

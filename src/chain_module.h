@@ -268,6 +268,8 @@ class RedisChainModule {
 
   // Runs "node_func" on every node in the chain; after the tail node has run it
   // too, finalizes the mutation by running "tail_func".
+  //
+  // The tail function is allowed to be nullptr.
   int ChainReplicate(RedisModuleCtx* ctx, RedisModuleString** argv, int argc,
                      NodeFunc node_func, TailFunc tail_func);
 
@@ -328,7 +330,8 @@ int RedisChainModule::MutateHelper(RedisModuleCtx* ctx,
                                    int sn) {
   // Node function.  Retrieve the mutated key.
   RedisModuleString* redis_key_str = nullptr;
-  node_func(ctx, argv, argc, &redis_key_str);
+  const int status = node_func(ctx, argv, argc, &redis_key_str);
+  if (!status) return status;
   CHECK(redis_key_str != nullptr);
 
   // State maintenance.
@@ -346,7 +349,7 @@ int RedisChainModule::MutateHelper(RedisModuleCtx* ctx,
   }
   record_sn(static_cast<int64_t>(sn));
 
-  if (ActAsTail()) {
+  if (ActAsTail() && tail_func) {
     tail_func(ctx, argv, argc);
   }
   return REDISMODULE_OK;

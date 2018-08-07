@@ -25,6 +25,8 @@ class MasterClient {
     kSnFlushed = 1,
   };
 
+  virtual ~MasterClient {}
+
   virtual Status Connect(const std::string& address, int port) = 0;
 
   // TODO(zongheng): impl.

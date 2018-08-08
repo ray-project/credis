@@ -13,6 +13,8 @@ const int N = 50000;
 aeEventLoop* loop = aeCreateEventLoop(64);
 int writes_completed = 0;
 int reads_completed = 0;
+int writes_successful = 0;
+int reads_successful = 0;
 Timer reads_timer, writes_timer;
 std::string last_issued_read_key;
 // Randomness.
@@ -25,6 +27,11 @@ void AsyncGet(redisAsyncContext*);
 void AsyncRandomCommand(redisAsyncContext*);
 
 void SeqPutCallback(redisAsyncContext* context, void*, void*) {
+  if (context->err) {
+    LOG(ERROR) << "Error: " << context->errstr;
+  } else {
+    ++writes_successful;
+  }
   ++writes_completed;
   writes_timer.TimeOpEnd(writes_completed);
   if (writes_completed + reads_completed == N) {
@@ -36,6 +43,11 @@ void SeqPutCallback(redisAsyncContext* context, void*, void*) {
 }
 
 void SeqGetCallback(redisAsyncContext* context, void* r, void* /*privdata*/) {
+  if (context->err) {
+    LOG(ERROR) << "Error: " << context->errstr;
+  } else {
+    ++reads_successful;
+  }
   ++reads_completed;
   const redisReply* reply = reinterpret_cast<redisReply*>(r);
   // LOG(INFO) << "reply type " << reply->type << "; issued get "
@@ -117,6 +129,7 @@ int main(int argc, char** argv) {
 
   auto end = std::chrono::system_clock::now();
   CHECK(writes_completed + reads_completed == N);
+  CHECK(writes_successful + reads_successful == N);
   LOG(INFO) << "ending bench";
   const int64_t latency_us =
       std::chrono::duration_cast<std::chrono::microseconds>(end - start)

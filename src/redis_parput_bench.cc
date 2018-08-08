@@ -7,8 +7,14 @@
 
 const int N = 5000000;
 int num_completed = 0;
+int num_successful = 0;
 aeEventLoop* loop = aeCreateEventLoop(1024);
-void ParPutCallback(redisAsyncContext*, void*, void*) {
+void ParPutCallback(redisAsyncContext* c, void*, void*) {
+  if (c->err) {
+    LOG(ERROR) << "Error: " << c->errstr;
+  } else {
+    ++num_successful;
+  }
   ++num_completed;
   if (num_completed == N) {
     aeStop(loop);
@@ -36,6 +42,8 @@ int main() {
   auto end = std::chrono::system_clock::now();
   CHECK(num_completed == N) << "num_completed " << num_completed << " vs N "
                             << N;
+  CHECK(num_successful == N) << "num_successful " << num_successful << " vs N "
+                             << N;
   LOG(INFO) << "ending bench";
 
   const int64_t latency_us =

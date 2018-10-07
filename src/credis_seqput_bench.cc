@@ -505,8 +505,8 @@ int main(int argc, char** argv) {
 
   CHECK(client->AttachToEventLoop(loop).ok());
   master_client = std::make_shared<RedisMasterClient>();
-  CHECK(
-      master_client->Connect(head_server, 6369).ok());  // TODO(zongheng): arg.
+  CHECK(master_client->Connect(head_server, 6369, "")
+            .ok());  // TODO(zongheng): arg.
 
   // NOTE(zongheng): RegisterAckCallback() subscribes ME to a channel.
   // SeqPutAckCallback is responsible for listening for:

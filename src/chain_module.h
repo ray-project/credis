@@ -41,7 +41,8 @@ void RedisDisconnectCallback(const redisAsyncContext* c, int /*status*/) {
   // so.
 }
 
-redisAsyncContext* AsyncConnect(const std::string& address, int port) {
+redisAsyncContext* AsyncConnect(const std::string& address, int port,
+                                const std::string& password) {
   redisAsyncContext* c = redisAsyncConnect(address.c_str(), port);
   if (c == NULL || c->err) {
     if (c) {
@@ -54,6 +55,8 @@ redisAsyncContext* AsyncConnect(const std::string& address, int port) {
   }
   CHECK(redisAsyncSetDisconnectCallback(c, &RedisDisconnectCallback) ==
         REDIS_OK);
+
+  redisAsyncCommand(c, NULL, NULL, "AUTH %s", password.c_str());
   return c;
 }
 
@@ -170,7 +173,8 @@ class RedisChainModule {
   }
 
   void Reset(const std::string& prev_address, const std::string& prev_port,
-             const std::string& next_address, const std::string& next_port) {
+             const std::string& next_address, const std::string& next_port,
+             const std::string& password) {
     if (!next_address.empty()) {
       next_address_ = next_address;
       next_port_ = next_port;
@@ -182,7 +186,7 @@ class RedisChainModule {
       }
       child_ = nullptr;
       if (next_address != "nil") {
-        child_ = AsyncConnect(next_address, std::stoi(next_port));
+        child_ = AsyncConnect(next_address, std::stoi(next_port), password);
       }
     }
 
@@ -195,13 +199,14 @@ class RedisChainModule {
       }
       parent_ = nullptr;
       if (prev_address != "nil") {
-        parent_ = AsyncConnect(prev_address, std::stoi(prev_port));
+        parent_ = AsyncConnect(prev_address, std::stoi(prev_port), password);
       }
     }
   }
 
-  Status ConnectToMaster(const std::string& address, int port) {
-    return master_client_->Connect(address, port);
+  Status ConnectToMaster(const std::string& address, int port,
+                         const std::string& password) {
+    return master_client_->Connect(address, port, password);
   }
   MasterClient* Master() { return master_client_.get(); }
 

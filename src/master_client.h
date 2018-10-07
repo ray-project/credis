@@ -25,9 +25,10 @@ class MasterClient {
     kSnFlushed = 1,
   };
 
-  virtual ~MasterClient {}
+  virtual ~MasterClient() {}
 
-  virtual Status Connect(const std::string& address, int port) = 0;
+  virtual Status Connect(const std::string& address, int port,
+                         const std::string& password) = 0;
 
   // TODO(zongheng): impl.
   // Retries the current head and tail nodes (for writes and reads,
@@ -60,7 +61,8 @@ class MasterClient {
 
 class RedisMasterClient : public MasterClient {
  public:
-  Status Connect(const std::string& address, int port) override;
+  Status Connect(const std::string& address, int port,
+                 const std::string& password) override;
   Status Head(std::string* address, int* port) override;
   Status Tail(std::string* address, int* port) override;
   Status GetWatermark(Watermark w, int64_t* val) const override;

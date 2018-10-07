@@ -14,7 +14,11 @@ const char* ReadString(const RedisModuleString* str, size_t* len);
 std::string ReadString(RedisModuleString* str);
 
 // On success, returns a synchronous redisContext client; else exit(1).
-redisContext* SyncConnect(const std::string& address, int port);
+redisContext* SyncConnect(const std::string& address, int port,
+                          const std::string& password);
+
+// Reconnects and re-authenticates a synchronous redisContext client.
+bool SyncReconnect(redisContext* c, const std::string& password);
 
 // Helper class to read data from a key and handle closing the key in an
 // appropriate way.

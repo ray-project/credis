@@ -8,7 +8,21 @@ extern "C" {
 }
 
 namespace {
-redisContext* SyncConnect(const std::string& address, int port) {
+bool AuthenticateContext(redisContext *c, const std::string& password) {
+  redisReply* reply = nullptr;
+  if (password == "") {
+    reply = reinterpret_cast<redisReply*>(redisCommand(c, "PING"));
+  } else {
+    reply = reinterpret_cast<redisReply*>(redisCommand(c, "AUTH %s", password.c_str()));
+  }
+
+  bool authenticated = (reply != nullptr && reply->type != REDIS_REPLY_ERROR);
+  freeReplyObject(reply);
+  return authenticated;
+}
+
+redisContext* SyncConnect(const std::string& address, int port,
+                          const std::string& password) {
   struct timeval timeout = {1, 500000};  // 1.5 seconds
   redisContext* c = redisConnectWithTimeout(address.c_str(), port, timeout);
   if (c == NULL || c->err) {
@@ -20,12 +34,20 @@ redisContext* SyncConnect(const std::string& address, int port) {
     }
     std::exit(1);
   }
+
+  if (!AuthenticateContext(c, password)) {
+    printf("Connection error: error authenticating\n");
+    redisFree(c);
+    std::exit(1);
+  }
+
   return c;
 }
 }  // namespace
 
-Status RedisMasterClient::Connect(const std::string& address, int port) {
-  redis_context_.reset(SyncConnect(address, port));
+Status RedisMasterClient::Connect(const std::string& address, int port,
+                                  const std::string& password) {
+  redis_context_.reset(SyncConnect(address, port, password));
   return Status::OK();
 }
 

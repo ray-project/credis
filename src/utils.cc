@@ -17,7 +17,22 @@ std::string ReadString(RedisModuleString* str) {
   return std::string(s, l);
 }
 
-redisContext* SyncConnect(const std::string& address, int port) {
+bool AuthenticateContext(redisContext* c, const std::string& password) {
+  redisReply* reply = nullptr;
+  if (password == "") {
+    reply = reinterpret_cast<redisReply*>(redisCommand(c, "PING"));
+  } else {
+    reply = reinterpret_cast<redisReply*>(
+        redisCommand(c, "AUTH %s", password.c_str()));
+  }
+
+  bool authenticated = (reply != nullptr && reply->type != REDIS_REPLY_ERROR);
+  freeReplyObject(reply);
+  return authenticated;
+}
+
+redisContext* SyncConnect(const std::string& address, int port,
+                          const std::string& password) {
   struct timeval timeout = {1, 500000};  // 1.5 seconds
   redisContext* c = redisConnectWithTimeout(address.c_str(), port, timeout);
   if (c == NULL || c->err) {
@@ -29,7 +44,21 @@ redisContext* SyncConnect(const std::string& address, int port) {
     }
     std::exit(1);
   }
+
+  if (!AuthenticateContext(c, password)) {
+    printf("Connection error: error authenticating\n");
+    redisFree(c);
+    std::exit(1);
+  }
+
   return c;
+}
+
+bool SyncReconnect(redisContext* c, const std::string& password) {
+  if (redisReconnect(c) != REDIS_OK) {
+    return false;
+  }
+  return AuthenticateContext(c, password);
 }
 
 KeyReader::KeyReader(RedisModuleCtx* ctx, const std::string& key) : ctx_(ctx) {

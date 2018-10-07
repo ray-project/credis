@@ -1,3 +1,4 @@
+import numpy as np
 import subprocess
 import time
 
@@ -55,7 +56,7 @@ def KillNode(index=None, port=None, stateless=False):
             del PORTS[PORTS.index(port)]
 
 
-def AddNode(master_client, port=None, gcs_mode=GCS_NORMAL):
+def AddNode(master_client, port=None, gcs_mode=GCS_NORMAL, password=None):
     global PORTS
     global MAX_USED_PORT
     if port is not None:
@@ -68,29 +69,39 @@ def AddNode(master_client, port=None, gcs_mode=GCS_NORMAL):
     print('launching redis-server --port %d' % new_port)
 
     with open("%d.log" % new_port, 'w') as output:
-        member = subprocess.Popen(
-            [
-                "redis/src/redis-server",
-                "--loadmodule",
-                "build/src/libmember.so",
-                str(gcs_mode),
-                "--port",
-                str(new_port),
-            ],
-            stdout=output,
-            stderr=output)
+        command = [
+            "redis/src/redis-server",
+            "--loadmodule",
+            "build/src/libmember.so",
+            str(gcs_mode),
+            "--port",
+            str(new_port),
+        ]
+        if password is not None:
+            print("requiring password")
+            command.extend(["--requirepass", password])
+        member = subprocess.Popen(command, stdout=output, stderr=output)
     time.sleep(0.1)
-    master_client.execute_command("MASTER.ADD", "127.0.0.1", str(new_port))
-    member_client = redis.StrictRedis("127.0.0.1", new_port)
+    if password is None:
+        master_client.execute_command("MASTER.ADD", "127.0.0.1", str(new_port))
+    else:
+        master_client.execute_command("MASTER.ADD", "127.0.0.1", str(new_port),
+                                      password)
+    member_client = redis.StrictRedis("127.0.0.1", new_port, password=password)
     master_port = master_client.connection_pool.connection_kwargs['port']
-    member_client.execute_command("MEMBER.CONNECT_TO_MASTER", "127.0.0.1",
-                                  master_port)
+
+    if password is None:
+        member_client.execute_command("MEMBER.CONNECT_TO_MASTER", "127.0.0.1",
+                                      master_port)
+    else:
+        member_client.execute_command("MEMBER.CONNECT_TO_MASTER", "127.0.0.1",
+                                      master_port, password)
     if port is None:
         PORTS.append(new_port)
     return member, new_port
 
 
-def Start(request=None, chain=INIT_PORTS, gcs_mode=GCS_NORMAL):
+def Start(request=None, chain=INIT_PORTS, gcs_mode=GCS_NORMAL, password=None):
     global PORTS
     global MAX_USED_PORT
     PORTS = list(chain)
@@ -100,23 +111,23 @@ def Start(request=None, chain=INIT_PORTS, gcs_mode=GCS_NORMAL):
 
     KillAll()
     with open("%d.log" % PORTS[0], 'w') as output:
-        master = subprocess.Popen(
-            [
-                "redis/src/redis-server",
-                "--loadmodule",
-                "build/src/libmaster.so",
-                str(gcs_mode),
-                "--port",
-                str(PORTS[0]),
-            ],
-            stdout=output,
-            stderr=output)
+        command = [
+            "redis/src/redis-server",
+            "--loadmodule",
+            "build/src/libmaster.so",
+            str(gcs_mode),
+            "--port",
+            str(PORTS[0]),
+        ]
+        if password is not None:
+            command.extend(["--requirepass", password])
+        master = subprocess.Popen(command, stdout=output, stderr=output)
     if request is not None:
         request.addfinalizer(master.kill)
-    master_client = redis.StrictRedis("127.0.0.1", PORTS[0])
+    master_client = redis.StrictRedis("127.0.0.1", PORTS[0], password=password)
 
     for port in PORTS[1:]:
-        member, _ = AddNode(master_client, port, gcs_mode)
+        member, _ = AddNode(master_client, port, gcs_mode, password=password)
         if request is not None:
             request.addfinalizer(member.kill)
 

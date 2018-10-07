@@ -1,3 +1,4 @@
+import numpy as np
 import time
 import unittest
 import uuid
@@ -11,13 +12,14 @@ _CLIENT_ID = str(uuid.uuid4())  # Used as the channel name receiving acks.
 
 class Basics(unittest.TestCase):
     def testAck(self):
-        common.Start()
+        password = np.random.bytes(64).hex()
+        common.Start(password=password)
 
-        head_client = redis.StrictRedis("127.0.0.1", 6370)
-        tail_client = redis.StrictRedis("127.0.0.1", 6371)
+        head_client = redis.StrictRedis("127.0.0.1", 6370, password=password)
+        tail_client = redis.StrictRedis("127.0.0.1", 6371, password=password)
         # The ack client needs to be separate, since subscriptions
         # are blocking
-        ack_client = redis.StrictRedis("127.0.0.1", 6371)
+        ack_client = redis.StrictRedis("127.0.0.1", 6371, password=password)
         p = ack_client.pubsub(ignore_subscribe_messages=True)
         p.subscribe(_CLIENT_ID)
         time.sleep(0.5)
@@ -29,6 +31,22 @@ class Basics(unittest.TestCase):
 
         assert ssn == 0
         assert int(put_ack["data"]) == ssn  # Check the sequence number
+
+    def testReplication(self):
+        password = np.random.bytes(64).hex()
+        common.Start(password=password)
+
+        master_client = redis.StrictRedis("127.0.0.1", 6369, password=password)
+        head_client = redis.StrictRedis("127.0.0.1", 6370, password=password)
+
+        head_client.execute_command("MEMBER.PUT", "k1", "v1", _CLIENT_ID)
+
+        member, new_port = common.AddNode(master_client, password=password)
+        tail_client = redis.StrictRedis(
+            "127.0.0.1", new_port, password=password)
+        assert tail_client.execute_command("GET k1") == b"v1"
+
+        common.MakeChain()  # reset the ports
 
 
 class GcsModeTests(unittest.TestCase):

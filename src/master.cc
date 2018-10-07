@@ -75,15 +75,16 @@ int ReplyIfFailure(RedisModuleCtx* rm_ctx, redisContext* ctx,
 Status SetRole(redisContext* context, const std::string& role,
                const std::string& prev_address, const std::string& prev_port,
                const std::string& next_address, const std::string& next_port,
-               long long* sn_result, long long sn = -1,
-               long long drop_writes = 0) {
+               const std::string& password, long long* sn_result,
+               long long sn = -1, long long drop_writes = 0) {
   const std::string sn_string = std::to_string(sn);
   const std::string drop_writes_string = std::to_string(drop_writes);
   if (!context->err) {
-    redisReply* reply = reinterpret_cast<redisReply*>(redisCommand(
-        context, "MEMBER.SET_ROLE %s %s %s %s %s %s %s", role.c_str(),
-        prev_address.c_str(), prev_port.c_str(), next_address.c_str(),
-        next_port.c_str(), sn_string.c_str(), drop_writes_string.c_str()));
+    redisReply* reply = reinterpret_cast<redisReply*>(
+        redisCommand(context, "MEMBER.SET_ROLE %s %s %s %s %s %s %s %s",
+                     role.c_str(), prev_address.c_str(), prev_port.c_str(),
+                     next_address.c_str(), next_port.c_str(), password.c_str(),
+                     sn_string.c_str(), drop_writes_string.c_str()));
     if (reply == NULL) {
       LOG(INFO) << "reply is NULL, IO error";
       LOG(INFO) << "error string: " << std::string(context->errstr);
@@ -128,17 +129,20 @@ Status SetRole(redisContext* context, const std::string& role,
 // Add a new replica to the chain
 // argv[1] is the IP address of the replica to be added
 // argv[2] is the port of the replica to be added
+// argv[3] is the optional password for the port
 int MasterAdd_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
                            int argc) {
-  if (argc != 3) {
+  if (argc != 3 && argc != 4) {
     return RedisModule_WrongArity(ctx);
   }
 
   const std::string address = ReadString(argv[1]);
   const std::string port = ReadString(argv[2]);
+  const std::string password = (argc == 4) ? ReadString(argv[3]) : "";
 
   size_t size = members.size();
-  redisContext* context = SyncConnect(address, std::stoi(port));
+  LOG(INFO) << "connecting...";
+  redisContext* context = SyncConnect(address, std::stoi(port), password);
   if (size == 0) {
     LOG(INFO) << "First node joined.";
     // Fall through.
@@ -156,12 +160,14 @@ int MasterAdd_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
       if (size > 1) {
         s = SetRole(found_tail.context, "middle",
                     /*re-use cached prev addr and port*/ "", "",
-                    /*next addr and port*/ address, port, &unused, /*sn=*/-1,
+                    /*next addr and port*/ address, port, password, &unused,
+                    /*sn=*/-1,
                     /*drop_writes=*/1);
       } else {
         s = SetRole(found_tail.context, "head",
                     /*prev addr and port*/ "nil", "nil",
-                    /*next addr and port*/ address, port, &unused, /*sn=*/-1,
+                    /*next addr and port*/ address, port, password, &unused,
+                    /*sn=*/-1,
                     /*drop_writes=*/1);
       }
       if (s.ok()) break;
@@ -186,7 +192,7 @@ int MasterAdd_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
 
       LOG(INFO) << "Setting new tail.";
       CHECK(SetRole(context, "tail", found_tail.address, found_tail.port, "nil",
-                    "nil", &unused)
+                    "nil", password, &unused)
                 .ok());
 
       // Let writes flow through.
@@ -197,7 +203,8 @@ int MasterAdd_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
 
     } else {
       LOG(INFO) << "Previous nodes all dead, new node becomes a singleton...";
-      CHECK(SetRole(context, "singleton", "nil", "nil", "nil", "nil", &unused)
+      CHECK(SetRole(context, "singleton", "nil", "nil", "nil", "nil", password,
+                    &unused)
                 .ok());
     }
   }
@@ -282,9 +289,11 @@ int MasterAdd_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
 int MasterRefreshHead_RedisCommand(RedisModuleCtx* ctx,
                                    RedisModuleString** argv, int argc) {
   REDISMODULE_NOT_USED(argv);
-  if (argc != 1) {
+  if (argc != 1 && argc != 2) {
     return RedisModule_WrongArity(ctx);
   }
+
+  const std::string password = (argc == 2) ? ReadString(argv[1]) : "";
 
   // RPC flow:
   // 1. master -> head: try to connect, check that if it's dead.
@@ -295,7 +304,7 @@ int MasterRefreshHead_RedisCommand(RedisModuleCtx* ctx,
   CHECK(!members.empty());
   redisContext* head = members[0].context;
   // (1).
-  if (redisReconnect(head) == REDIS_OK) {
+  if (SyncReconnect(head, password)) {
     // Current head is good.
     const std::string s = members[0].address + ":" + members[0].port;
     return RedisModule_ReplyWithSimpleString(ctx, s.data());
@@ -310,11 +319,11 @@ int MasterRefreshHead_RedisCommand(RedisModuleCtx* ctx,
   if (members.size() == 1) {
     LOG(INFO) << "SetRole(singleton)";
     SetRole(members[0].context, "singleton", "nil", "nil", "nil", "nil",
-            &unused);
+            password, &unused);
   } else {
     LOG(INFO) << "SetRole(head)";
     SetRole(members[0].context, "head", /*prev addr and port*/ "nil", "nil",
-            /*re-use cached next addr and port*/ "", "", &unused);
+            /*re-use cached next addr and port*/ "", "", password, &unused);
   }
   // (3).
   const std::string s = members[0].address + ":" + members[0].port;
@@ -326,15 +335,17 @@ int MasterRefreshHead_RedisCommand(RedisModuleCtx* ctx,
 int MasterRefreshTail_RedisCommand(RedisModuleCtx* ctx,
                                    RedisModuleString** argv, int argc) {
   REDISMODULE_NOT_USED(argv);
-  if (argc != 1) {
+  if (argc != 1 && argc != 2) {
     return RedisModule_WrongArity(ctx);
   }
+
+  const std::string password = (argc == 2) ? ReadString(argv[1]) : "";
 
   // RPC flow is similar to MASTER.REFRESH_HEAD.
   CHECK(!members.empty());
   redisContext* tail = members.back().context;
   // (1).
-  if (redisReconnect(tail) == REDIS_OK) {
+  if (SyncReconnect(tail, password)) {
     // Current tail is good.
     const std::string s = members.back().address + ":" + members.back().port;
     return RedisModule_ReplyWithSimpleString(ctx, s.data());
@@ -349,12 +360,12 @@ int MasterRefreshTail_RedisCommand(RedisModuleCtx* ctx,
   if (members.size() == 1) {
     LOG(INFO) << "SetRole(singleton)";
     SetRole(members.back().context, "singleton", "nil", "nil", "nil", "nil",
-            &unused);
+            password, &unused);
   } else {
     LOG(INFO) << "SetRole(tail)";
     SetRole(members.back().context, "tail",
             /*re-use cached prev addr and port*/ "", "",
-            /*next addr and port*/ "nil", "nil", &unused);
+            /*next addr and port*/ "nil", "nil", password, &unused);
   }
   // (3).
   const std::string s = members.back().address + ":" + members.back().port;

@@ -287,7 +287,7 @@ size_t FindFirstOf(char c, size_t pos, const char* str, size_t len) {
 // Returns the latest sequence number on this node
 int MemberSetRole_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
                                int argc) {
-  if (argc != 8) {
+  if (argc != 8 && argc != 9) {
     return RedisModule_WrongArity(ctx);
   }
   std::string role = ReadString(argv[1]);
@@ -307,11 +307,13 @@ int MemberSetRole_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
   const std::string prev_port = ReadString(argv[3]);
   const std::string next_address = ReadString(argv[4]);
   const std::string next_port = ReadString(argv[5]);
+  const std::string password = (argc == 9) ? ReadString(argv[6]) : "";
 
   LOG(INFO) << "MemberSetRole args: " << role << " " << prev_address << " "
-            << prev_port << " " << next_address << " " << next_port;
+            << prev_port << " " << next_address << " " << next_port << " "
+            << password;
 
-  module.Reset(prev_address, prev_port, next_address, next_port);
+  module.Reset(prev_address, prev_port, next_address, next_port, password);
 
   if (module.child()) {
     CHECK(!module.child()->err);
@@ -325,8 +327,10 @@ int MemberSetRole_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
     redisAeAttach(loop, module.parent());
   }
 
-  const int64_t first_sn = std::stoi(ReadString(argv[6]));
-  const bool drop_writes = std::stoi(ReadString(argv[7])) ? true : false;
+  int first_sn_idx = (argc == 9) ? 7 : 6;
+  const int64_t first_sn = std::stoi(ReadString(argv[first_sn_idx]));
+  const bool drop_writes =
+      std::stoi(ReadString(argv[first_sn_idx + 1])) ? true : false;
   LOG(INFO) << "In MemberSetRole drop_writes: " << drop_writes;
   if (drop_writes) module.SetDropWrites(drop_writes);
 
@@ -359,15 +363,16 @@ int MemberSetRole_RedisCommand(RedisModuleCtx* ctx, RedisModuleString** argv,
 
 int MemberConnectToMaster_RedisCommand(RedisModuleCtx* ctx,
                                        RedisModuleString** argv, int argc) {
-  if (argc != 3) {
+  if (argc != 3 && argc != 4) {
     return RedisModule_WrongArity(ctx);
   }
   size_t size = 0;
   const char* ptr = RedisModule_StringPtrLen(argv[1], &size);
   long long port = 0;
   RedisModule_StringToLongLong(argv[2], &port);
+  const std::string password = (argc == 4) ? ReadString(argv[3]) : "";
   DLOG(INFO) << "Calling ConnectToMaster, port " << port;
-  Status s = module.ConnectToMaster(std::string(ptr, size), port);
+  Status s = module.ConnectToMaster(std::string(ptr, size), port, password);
   DLOG(INFO) << " " << s.ToString();
   if (!s.ok()) return RedisModule_ReplyWithError(ctx, s.ToString().data());
   return RedisModule_ReplyWithSimpleString(ctx, "OK");

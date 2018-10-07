@@ -46,7 +46,7 @@ class Basics(unittest.TestCase):
             "127.0.0.1", new_port, password=password)
         assert tail_client.execute_command("GET k1") == b"v1"
 
-        common.MakeChain()  # reset the ports
+        common.MakeChain()  # reset the ports so testFlushOnly doesn't fail
 
 
 class GcsModeTests(unittest.TestCase):
